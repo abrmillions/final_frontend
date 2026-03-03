@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: clms_postgres
+    environment:
+      POSTGRES_DB: construction_license
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: clms2025
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  django:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: clms_django
+    command: python manage.py runserver 0.0.0.0:8000
+    environment:
+      DEBUG: "True"
+      SECRET_KEY: "django-insecure-dev-key-change-in-production"
+      DB_NAME: construction_license
+      DB_USER: postgres
+      DB_PASSWORD: clms2025
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      ALLOWED_HOSTS: "localhost,127.0.0.1,django"
+      CORS_ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  nextjs:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: clms_nextjs
+    environment:
+      NEXT_PUBLIC_DJANGO_API_URL: "http://django:8000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/.next
+    depends_on:
+      - django
+    command: npm run dev
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: clms_network

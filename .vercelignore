@@ -1,0 +1,13 @@
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+.git
+.gitignore
+.env.local
+.env.*.local
+backend/
+docker-compose.yml
+.DS_Store
+*.log
+node_modules/
+.next/

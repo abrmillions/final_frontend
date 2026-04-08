@@ -39,6 +39,21 @@ export function ImportExportStep2({ data, updateData, onNext, onBack }: Step2Pro
         </div>
 
         <div className="space-y-2">
+          <Label htmlFor="permitDetails">Permit Details *</Label>
+          <Select value={data.permitDetails} onValueChange={(value) => updateData({ permitDetails: value })}>
+            <SelectTrigger id="permitDetails">
+              <SelectValue placeholder="Select permit details" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="general-importer">General Importer</SelectItem>
+              <SelectItem value="general-exporter">General Exporter</SelectItem>
+              <SelectItem value="special-importer">Special Importer</SelectItem>
+              <SelectItem value="special-exporter">Special Exporter</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
           <Label htmlFor="duration">Permit Duration *</Label>
           <Select value={data.duration} onValueChange={(value) => updateData({ duration: value })}>
             <SelectTrigger id="duration">

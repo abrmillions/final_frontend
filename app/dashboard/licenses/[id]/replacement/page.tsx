@@ -8,12 +8,17 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/hooks/use-toast"
+import { useAuth } from "@/lib/auth/auth-context"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 export default function ReplacementPage() {
   const params = useParams<{ id: string }>()
   const id = params?.id
   const router = useRouter()
   const { toast, dismiss } = useToast()
+  const { maintenanceMode, user } = useAuth()
+  const isAdmin = (user?.role || "").toLowerCase() === "admin"
+  const disabled = maintenanceMode && !isAdmin
   const [licenseType, setLicenseType] = useState<string>("")
   const [reason, setReason] = useState<string>("")
   const [loading, setLoading] = useState<boolean>(true)
@@ -39,6 +44,10 @@ export default function ReplacementPage() {
 
   const handleSubmit = async () => {
     dismiss()
+    if (disabled) {
+      toast({ title: "Maintenance in Progress", description: "Submissions are temporarily disabled.", variant: "destructive" })
+      return
+    }
     if (!reason.trim()) {
       toast({ title: "Missing", description: "Enter the replacement reason", variant: "destructive" })
       return
@@ -71,8 +80,14 @@ export default function ReplacementPage() {
         <>
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-bold">License Replacement</h1>
-            <Button asChild variant="outline"><Link href={`/dashboard/licenses/${id}`}>Back to License</Link></Button>
+            <Button asChild variant="outlineBlueHover"><Link href={`/dashboard/licenses/${id}`}>Back to License</Link></Button>
           </div>
+          {disabled && (
+            <Alert className="border-amber-300 bg-amber-50 text-amber-800 mb-4">
+              <AlertTitle>Maintenance in Progress</AlertTitle>
+              <AlertDescription>Submissions are temporarily disabled.</AlertDescription>
+            </Alert>
+          )}
           <Card className="max-w-xl">
             <CardHeader>
               <CardTitle>Replacement Reason</CardTitle>
@@ -84,8 +99,8 @@ export default function ReplacementPage() {
                 <Textarea id="reason" rows={5} value={reason} onChange={(e) => setReason(e.target.value)} disabled={loading} />
               </div>
               <div className="flex gap-3">
-                <Button variant="outline" asChild><Link href={`/dashboard/licenses/${id}`}>Cancel</Link></Button>
-                <Button onClick={handleSubmit} disabled={submitting || loading}>Submit</Button>
+                <Button variant="outlineBlueHover" asChild><Link href={`/dashboard/licenses/${id}`}>Cancel</Link></Button>
+                <Button onClick={handleSubmit} disabled={submitting || loading || disabled}>Submit</Button>
               </div>
             </CardContent>
           </Card>
@@ -103,7 +118,7 @@ export default function ReplacementPage() {
             <CardContent className="space-y-4">
               <div className="flex gap-3">
                 <Button asChild className="flex-1"><Link href={`/dashboard/applications?newApp=replacement&appId=${encodeURIComponent(submittedAppId || '')}`}>View Applications</Link></Button>
-                <Button asChild variant="outline" className="flex-1 bg-transparent"><Link href={`/dashboard/licenses/${id}`}>Back to License</Link></Button>
+                <Button asChild variant="outlineBlueHover" className="flex-1 bg-transparent"><Link href={`/dashboard/licenses/${id}`}>Back to License</Link></Button>
               </div>
             </CardContent>
           </Card>

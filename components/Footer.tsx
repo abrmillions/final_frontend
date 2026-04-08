@@ -46,7 +46,7 @@ export function Footer() {
             </div>
             <p className="text-sm text-gray-300 leading-relaxed">
               A digital transformation initiative for the Oromia Construction and Urban Development Bureau. 
-              The system is designed to automate construction licensing, improve transparency.
+              The system is designed to automate construction licensing and improve transparency.
             </p>
           </div>
 

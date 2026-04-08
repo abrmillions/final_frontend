@@ -15,6 +15,8 @@ import { generatePartnershipPDF } from "@/lib/downloads/pdf-generator"
 import { downloadPDF } from "@/lib/downloads/file-download"
 import { copyToClipboard, printPage, shareLink } from "@/lib/button-actions"
 import { useToast } from "@/hooks/use-toast"
+ import { useAuth } from "@/lib/auth/auth-context"
+ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
  
 function QueryReader({ onFound }: { onFound: (value: string) => void }) {
   const searchParams = useSearchParams()
@@ -38,6 +40,7 @@ export default function PartnershipPublicVerifyPage() {
   const [lastSource, setLastSource] = useState<string>("")
   const expiryRef = useRef<number | null>(null)
   const timerRef = useRef<number | null>(null)
+  const { maintenanceMode } = useAuth()
  
   const handleVerify = async (input?: string) => {
    const source = String(((input ?? id) || "")).trim()
@@ -172,13 +175,18 @@ export default function PartnershipPublicVerifyPage() {
    })()
  
   const handleDownloadCertificate = async () => {
+    setLoading(true)
     try {
-      const src = detail || result || { id }
-      const pdf = await generatePartnershipPDF(src)
-      const name = `Partnership-${String(src.id || id)}.pdf`
-      downloadPDF(pdf, name)
+      const p = result || detail || { id }
+      const pdf = await generatePartnershipPDF(p)
+      const fileName = `Partnership-${String(p.id || id)}.pdf`
+      downloadPDF(pdf, fileName)
+      toast({ title: "Downloaded", description: "Partnership certificate saved as PDF." })
     } catch (e: any) {
-      setError(e?.message || "Failed to download certificate")
+      console.error("PDF download error:", e)
+      toast({ title: "Error", description: "Failed to generate certificate PDF.", variant: "destructive" })
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -187,6 +195,12 @@ export default function PartnershipPublicVerifyPage() {
       <Suspense fallback={<div>Loading...</div>}>
         <QueryReader onFound={(qp) => { setId(qp); setShowScanner(false) }} />
       </Suspense>
+      {maintenanceMode && (
+        <Alert className="border-amber-300 bg-amber-50 text-amber-800 mb-6">
+          <AlertTitle>Maintenance in Progress</AlertTitle>
+          <AlertDescription>Verification may be temporarily unavailable during updates.</AlertDescription>
+        </Alert>
+      )}
        <Card className="mb-6">
         <CardHeader>
           <CardTitle>Verify Partnership</CardTitle>

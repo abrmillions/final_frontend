@@ -23,16 +23,40 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>
   isAuthenticated: boolean
   updateUser: (u: User) => void
+  maintenanceMode: boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children, initialMaintenance }: { children: React.ReactNode; initialMaintenance?: boolean }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [maintenanceMode, setMaintenanceMode] = useState(Boolean(initialMaintenance))
 
   // Check session on mount and restore from JWT if available
   useEffect(() => {
+    const fetchMaintenance = async () => {
+      try {
+        const { DJANGO_ENDPOINTS } = await import("@/lib/config/django-api")
+        const endpoint = typeof window !== 'undefined' ? '/api/system/maintenance/' : DJANGO_ENDPOINTS.system.maintenance
+        const r = await fetch(endpoint, { cache: "no-store" })
+        if (r.ok) {
+          const s = await r.json()
+          setMaintenanceMode(!!s.maintenance_mode)
+        } else if (r.status === 503) {
+          setMaintenanceMode(true)
+        }
+      } catch (e) {
+        console.warn("[clms] Could not fetch maintenance status:", e)
+      }
+    }
+
+    // Initial fetch to sync client with potentially stale SSR value
+    fetchMaintenance()
+
+    // Poll for maintenance mode every 30 seconds
+    const interval = setInterval(fetchMaintenance, 30000)
+
     const checkSession = async () => {
       try {
         const tokens = typeof window !== "undefined" ? localStorage.getItem("clms_tokens") : null
@@ -76,6 +100,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     checkSession()
+
+    return () => {
+      clearInterval(interval)
+    }
   }, [])
 
   const logout = async () => {
@@ -135,6 +163,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         isAuthenticated: user !== null,
         updateUser,
+        maintenanceMode,
       }}
     >
       {children}

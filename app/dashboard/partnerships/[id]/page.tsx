@@ -1,7 +1,8 @@
  "use client"
  
- import { useEffect, useState } from "react"
- import { useParams, useRouter } from "next/navigation"
+ import { Suspense } from "react"
+import { useEffect, useState, useRef } from "react"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
  import Link from "next/link"
  import { Button } from "@/components/ui/button"
  import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -16,13 +17,62 @@
  import type { Partnership } from "@/lib/types/partnership"
  
  export default function PartnershipDetailPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    }>
+      <PartnershipDetailContent />
+    </Suspense>
+  )
+}
+
+function PartnershipDetailContent() {
    const { id } = useParams<{ id: string }>()
    const router = useRouter()
+   const searchParams = useSearchParams()
    const { toast } = useToast()
    const [partnership, setPartnership] = useState<Partnership | null>(null)
    const [loading, setLoading] = useState<boolean>(true)
    const [downloading, setDownloading] = useState<boolean>(false)
    const [copying, setCopying] = useState<boolean>(false)
+   const processedPaidIdRef = useRef<string | null>(null)
+ 
+   useEffect(() => {
+     const paid = searchParams.get("paid")
+     const paidId = searchParams.get("id")
+     
+     if (paid === "1" && paidId && String(paidId) === String(id) && partnership) {
+       // Prevent double download
+       if (processedPaidIdRef.current === paidId) return;
+       
+       const triggerDownload = async () => {
+         processedPaidIdRef.current = paidId;
+         setDownloading(true)
+         try {
+           const pdf = await generatePartnershipPDF(partnership)
+           const fileName = `Partnership-${String(partnership.id)}.pdf`
+           downloadPDF(pdf, fileName)
+           toast({
+             title: "Payment Successful! 🎉",
+             description: "Your partnership certificate has been downloaded.",
+           })
+           // Clean up URL
+           const url = new URL(window.location.href)
+           url.searchParams.delete("paid")
+           url.searchParams.delete("id")
+           window.history.replaceState({}, "", url.toString())
+         } catch (error) {
+           console.error("Failed to download certificate:", error)
+           processedPaidIdRef.current = null; // Reset on failure
+         } finally {
+           setDownloading(false)
+         }
+       }
+       triggerDownload()
+     }
+   }, [searchParams, partnership, id, toast])
  
    useEffect(() => {
      const load = async () => {
@@ -71,17 +121,10 @@
        })
        return
      }
-     setDownloading(true)
-     try {
-       const pdf = await generatePartnershipPDF(partnership)
-       const fileName = `Partnership-${String(partnership.id)}.pdf`
-       downloadPDF(pdf, fileName)
-       toast({ title: "Downloaded", description: "Partnership certificate has been downloaded." })
-     } catch (e) {
-       toast({ title: "Error", description: "Failed to download certificate.", variant: "destructive" })
-     } finally {
-       setDownloading(false)
-     }
+     
+     // Redirect to payment page
+     const category = String(partnership.partnership_type || "").toLowerCase() === "foreign_local" ? "partnership-foreign" : "partnership-standard"
+     router.push(`/dashboard/payments/certificate/${partnership.id}?section=partnership&category=${category}`)
    }
  
    const handleCopyCertificate = async () => {
@@ -152,7 +195,7 @@
              </div>
            </div>
            <div className="flex items-center gap-2">
-             <Button variant="outline" asChild>
+            <Button variant="outlineBlueHover" asChild>
                <Link href="/dashboard/partnerships">
                  <ArrowLeft className="w-4 h-4 mr-2" />
                  Back

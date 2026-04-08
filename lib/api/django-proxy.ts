@@ -12,6 +12,10 @@ async function copyHeadersToObject(headers: Headers) {
 export async function proxyToDjango(request: Request, djangoPath: string) {
   // Build target URL preserving query string
   const incomingUrl = new URL(request.url);
+  
+  // Use the djangoPath as-is. Since it starts with '/api/', and DJANGO_API_URL
+  // is the base (e.g. http://127.0.0.1:8000), the resulting URL will be
+  // http://127.0.0.1:8000/api/... which matches the Django backend routing.
   const targetUrl = new URL(djangoPath, DJANGO_API_URL);
   targetUrl.search = incomingUrl.search;
 
@@ -67,10 +71,62 @@ export async function proxyToDjango(request: Request, djangoPath: string) {
   // eslint-disable-next-line no-console
   console.debug("[proxy] Forwarding to", targetUrl.toString());
 
-  const res = await fetch(targetUrl.toString(), init);
+  let res: Response;
+  try {
+    res = await fetch(targetUrl.toString(), init);
+  } catch (e: any) {
+    try {
+      console.error("[proxy] Backend fetch failed:", e?.message || e);
+    } catch {}
+    return new NextResponse(
+      JSON.stringify({
+        error: "backend_unreachable",
+        detail:
+          `Could not reach backend at ${new URL(DJANGO_API_URL).origin}. Ensure the Django server is running.`,
+      }),
+      {
+        status: 502,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  }
 
   const bodyBuffer = await res.arrayBuffer().catch(() => new ArrayBuffer(0));
   const respHeaders = await copyHeadersToObject(res.headers);
+
+  // If Django returns a redirect, rewrite the Location header to point back to the proxy
+  if (res.status >= 300 && res.status < 400 && respHeaders["location"]) {
+    try {
+      const locationUrl = new URL(respHeaders["location"]);
+      const djangoOrigin = new URL(DJANGO_API_URL).origin;
+      const incomingOrigin = new URL(request.url).origin;
+      
+      if (locationUrl.origin === djangoOrigin) {
+        // Rewrite to same-origin proxy path
+        const newLocation = locationUrl.pathname + locationUrl.search;
+        
+        // CRITICAL: Prevent infinite redirect loops if Django redirects to EXACTLY what we just requested
+        const incomingPath = new URL(request.url).pathname;
+        if (newLocation === incomingPath) {
+            // eslint-disable-next-line no-console
+            console.error("[proxy] Infinite circular redirect detected from Django!", {
+                path: incomingPath,
+                djangoLocation: respHeaders["location"]
+            });
+            return new NextResponse(JSON.stringify({ error: "Circular redirect detected", detail: `Django redirected ${incomingPath} to itself` }), {
+                status: 500,
+                headers: { "Content-Type": "application/json" }
+            });
+        }
+
+        // eslint-disable-next-line no-console
+        console.debug("[proxy] Rewriting redirect Location header:", respHeaders["location"], "->", newLocation);
+        respHeaders["location"] = newLocation;
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  }
 
   // Try to decode body for logging and to ensure content-type
   let bodyText = "";

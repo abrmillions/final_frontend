@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -23,6 +23,7 @@ export default function MyLicenses() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState("")
   const [newLicenseBanner, setNewLicenseBanner] = useState(false)
+  const processedPaidIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     const migrateCachedAndFetchLicenses = async () => {
@@ -108,6 +109,8 @@ export default function MyLicenses() {
             contractor: "Contractor License",
             professional: "Professional License",
             vehicle: "Vehicle License",
+            partnership: "Partnership/JV License",
+            jv: "Partnership/JV License",
             profile: "Contractor License",
             company_representative: "Import/Export License",
             'import-export': "Import/Export License",
@@ -149,6 +152,7 @@ export default function MyLicenses() {
             holderName: d.holderName || d.holder_name || lic.holder_full_name || lic.holder_name || (currentFullName || lic.owner || ""),
             companyName: lic.company_name || d.companyName || d.company_name || "",
             position: d.position || d.currentPosition || d.current_position || "",
+            permitDetails: lic.subtype || d.permitDetails || d.permit_details || d.subtype || "",
             issueDate,
             expiryDate,
             status: finalStatus,
@@ -183,18 +187,6 @@ export default function MyLicenses() {
     }
 
     migrateCachedAndFetchLicenses()
-    try {
-      if (typeof window !== 'undefined') {
-        const url = new URL(window.location.href)
-        const paid = url.searchParams.get('paid')
-        if (paid === '1') {
-          toast({ title: "succesfully  paid", description: "You can download the certificate now." })
-          url.searchParams.delete('paid')
-          window.history.replaceState({}, "", url.toString())
-          migrateCachedAndFetchLicenses()
-        }
-      }
-    } catch {}
 
     const onStorage = (e: StorageEvent) => {
       if (e.key === 'clms_licenses_refresh') {
@@ -218,6 +210,42 @@ export default function MyLicenses() {
     }
   }, [])
 
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return
+      const url = new URL(window.location.href)
+      const paid = url.searchParams.get('paid')
+      const id = url.searchParams.get('id')
+      
+      if (paid === '1' && id && licenses.length > 0) {
+        // Prevent double download
+        if (processedPaidIdRef.current === id) return
+        
+        const target = licenses.find((l) => String(l.backendId) === String(id) || String(l.id) === String(id) || String(l.licenseNumber) === String(id))
+        if (target) {
+          processedPaidIdRef.current = id
+          handleDownloadCertificate(target)
+          url.searchParams.delete('paid')
+          url.searchParams.delete('id')
+          window.history.replaceState({}, "", url.toString())
+        }
+      }
+    } catch {}
+  }, [licenses])
+
+  const resolveSection = (lic: any) => {
+    const t = String(lic.type || lic.license_type || "").toLowerCase()
+    const p = String(lic.position || "").toLowerCase()
+    
+    if (t.includes("professional") || t.includes("consultant") || p.length > 0) return "professional"
+    if (t.includes("import") || t.includes("export") || t.includes("trade")) return "importExport"
+    if (t.includes("partnership") || t.includes("jv")) return "partnership"
+    if (t.includes("vehicle") || t.includes("machinery")) return "vehicle"
+    if (t.includes("contractor")) return "contractor"
+    
+    return "contractor"
+  }
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "active":
@@ -235,82 +263,74 @@ export default function MyLicenses() {
     }
   }
 
-  const handleDownloadCertificate = async (license: any) => {
-    setDownloadingId(license.backendId || license.id)
-    try {
-      // format license number consistently: prefer licenseNumber, else format numeric id
-      const formatLicenseNo = (raw: any, issueDate?: string) => {
-        if (!raw && String(raw) !== '0') return 'PENDING'
-        const s = String(raw)
-        if (/^LIC-\d{4}-\d{4,}$/.test(s.toUpperCase())) return s.toUpperCase()
-        if (/[^0-9]/.test(s)) return s.toUpperCase()
-        const year = (() => {
-          try {
-            const d = new Date(issueDate || Date.now())
-            return d.getFullYear()
-          } catch (e) { return new Date().getFullYear() }
-        })()
-        return `LIC-${year}-${s.padStart(6, '0')}`
-      }
-      // Force regeneration of verification URL and QR code to ensure consistency
-      const verificationUrl = createVerificationUrl(undefined, (license.backendId ? String(license.backendId) : String(license.licenseNumber || license.registrationNumber)), license.licenseNumber || license.registrationNumber)
-
-      const djangoApi = (await import('@/lib/api/django-client')).default
-      let vRes: any = null
-      try {
-        vRes = await djangoApi.verifyLicense({ licenseNumber: String(license.licenseNumber || license.registrationNumber) })
-      } catch {}
-      const finalIssue = (vRes?.issued_date || license.issueDate || license.issued_date || license.data?.issueDate || '2026-02-15T00:00:00Z')
-      const finalExpiry = (vRes?.expiry_date || license.expiryDate || license.expiry_date || license.data?.expiryDate || '2031-02-15T00:00:00Z')
-      const cleanQrContent = {
-        id: license.backendId || license.id,
-        type: license.type || license.license_type,
-        category: "License",
-        grade: license.grade || "",
-        holderName: license.holderName || license.data?.holderName,
-        companyName: license.companyName || license.data?.companyName,
-        position: license.position || license.data?.position || license.data?.currentPosition || license.data?.current_position,
-        registrationNumber: license.licenseNumber || license.registrationNumber || license.data?.registrationNumber,
-        issueDate: finalIssue,
-        expiryDate: finalExpiry,
-        status: license.status,
-        verificationUrl
-      }
-
-      const qrPayload = createLicenseQRPayload({
-        licenseId: String(cleanQrContent.id),
-        licenseNumber: String(cleanQrContent.registrationNumber),
-        holderName: String(cleanQrContent.holderName || ''),
-        companyName: String(cleanQrContent.companyName || ''),
-        type: String(cleanQrContent.type || 'License'),
-        issueDate: String(finalIssue),
-        expiryDate: String(finalExpiry),
-        verificationUrl: String(verificationUrl),
-      })
-      const qrDataUrl = await generateQRDataURL(JSON.stringify(qrPayload))
-
-      const pdf = await generateLicensePDF({
-        ...cleanQrContent,
-        qrDataUrl,
-        photoUrl: license.photoUrl,
-      })
-      const fileNameId = license.licenseNumber || license.registrationNumber || (license.backendId ? String(license.backendId) : String(license.id))
-      const safeFileName = formatLicenseNo(fileNameId, license.issueDate || license.issueDate)
-      downloadPDF(pdf, `License-${safeFileName}.pdf`)
-      toast({
-        title: "Downloaded",
-        description: "License certificate has been downloaded as PDF.",
-      })
-    } catch (error) {
-      console.error("Error downloading certificate:", error)
-      toast({
-        title: "Error",
-        description: "Failed to download certificate.",
-        variant: "destructive",
-      })
-    } finally {
-      setDownloadingId(null)
+  const resolveCategory = (lic: any) => {
+    const section = resolveSection(lic)
+    const t = String(lic.type || lic.license_type || "").toLowerCase()
+    const g = String(lic.grade || "").toLowerCase().trim().replace(/\s+/g, '-')
+    const p = String(lic.position || "").toLowerCase()
+    const d = String(lic.permitDetails || "").toLowerCase()
+    
+    if (section === "professional") {
+      if (t.includes("engineer") || g.includes("engineer") || p.includes("engineer")) return "engineer"
+      if (t.includes("architect") || g.includes("architect") || p.includes("architect")) return "architect"
+      if (t.includes("surveyor") || g.includes("surveyor") || p.includes("surveyor")) return "surveyor"
+      if (t.includes("consultant") || g.includes("consultant") || p.includes("consultant")) return "consultant"
+      return "engineer"
     }
+    
+    if (section === "importExport") {
+      const isSpecial = t.includes("special") || g.includes("special") || d.includes("special")
+      if (t.includes("importer") || g.includes("importer") || d.includes("importer")) {
+        return isSpecial ? "special-importer" : "general-importer"
+      }
+      if (t.includes("exporter") || g.includes("exporter") || d.includes("exporter")) {
+        return isSpecial ? "special-exporter" : "general-exporter"
+      }
+      return "general-importer"
+    }
+    
+    if (section === "partnership") {
+      return t.includes("foreign") || g.includes("foreign") ? "partnership-foreign" : "partnership-standard"
+    }
+    
+    if (section === "vehicle") {
+      return t.includes("machinery") || g.includes("machinery") ? "heavy-machinery" : "commercial-vehicle"
+    }
+
+    // Contractor (Default)
+    if (g.includes("1")) return "grade-1"
+    if (g.includes("2")) return "grade-2"
+    if (g.includes("3")) return "grade-3"
+    if (g.includes("4")) return "grade-4"
+    if (g.includes("5")) return "grade-5"
+    if (g.includes("6")) return "grade-6"
+    if (g.includes("7")) return "grade-7"
+    if (g.includes("b")) return "grade-b"
+    
+    return "grade-1"
+  }
+
+  const handleDownloadCertificate = async (license: any) => {
+    // If the license is already active and the system marks it as downloadable, download directly
+    if (license.status === "active" && license.canDownload !== false) {
+      try {
+        const { generateLicensePDF } = await import("@/lib/downloads/pdf-generator")
+        const pdf = await generateLicensePDF(license)
+        if (pdf) {
+          pdf.save(`${license.type || "License"}-${license.licenseNumber || license.id}.pdf`)
+          toast({
+            title: "Success",
+            description: "Your certificate has been generated and downloaded.",
+          })
+          return
+        }
+      } catch (err) {
+        console.error("PDF generation failed:", err)
+      }
+    }
+
+    // Otherwise, redirect to payment page
+    router.push(`/dashboard/payments/certificate/${license.backendId || license.id}?section=${resolveSection(license)}&category=${resolveCategory(license)}`)
   }
 
   return (
@@ -326,7 +346,7 @@ export default function MyLicenses() {
               <p className="text-[11px] sm:text-xs text-slate-600">View and manage your licenses</p>
             </div>
           </div>
-          <Button variant="outline" size="sm" asChild className="h-8 px-3 text-xs w-full sm:w-auto">
+          <Button variant="outlineBlueHover" size="sm" asChild className="h-8 px-3 text-xs w-full sm:w-auto">
             <Link href="/dashboard">
               <ArrowLeft className="h-3 w-3 mr-1.5" />
               Back
@@ -353,7 +373,7 @@ export default function MyLicenses() {
           <Card className="max-w-2xl mx-auto">
             <CardContent className="px-6 py-10 text-center">
               <p className="text-red-600 font-semibold">{error}</p>
-              <Button asChild className="mt-4">
+              <Button variant="outlineBlueHover" asChild className="mt-4">
                 <Link href="/dashboard">Back to Dashboard</Link>
               </Button>
             </CardContent>
@@ -369,59 +389,63 @@ export default function MyLicenses() {
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-3 max-w-3xl mx-auto">
+          <div className="space-y-4 max-w-3xl mx-auto">
             {licenses.map((license) => (
               <Card
                 key={license.backendId || license.id}
-                className="hover:shadow-md transition-shadow rounded-xl border-slate-200"
+                className="hover:shadow-md transition-shadow rounded-xl border-slate-200 overflow-hidden"
               >
-                <CardHeader className="px-5 py-4">
+                <CardHeader className="px-4 sm:px-5 py-4">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       {license.photoUrl ? (
-                        <img src={license.photoUrl} alt="license photo" className="w-12 h-12 rounded-md object-cover" />
+                        <img src={license.photoUrl} alt="license photo" className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg object-cover border shrink-0 shadow-sm" />
                       ) : (
-                        <div className="w-12 h-12 rounded-md bg-slate-100" />
+                        <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                          <Building2 className="h-5 w-5 sm:h-6 sm:w-6 text-slate-400" />
+                        </div>
                       )}
-                      <div className="space-y-1">
-                        <CardTitle className="text-sm sm:text-base font-semibold">
+                      <div className="min-w-0">
+                        <CardTitle className="text-sm sm:text-base font-bold text-slate-900 truncate">
                           {license.type}
                         </CardTitle>
-                        <CardDescription className="text-[11px] sm:text-xs">
+                        <CardDescription className="text-[10px] sm:text-xs font-medium text-slate-500 truncate">
                           {license.category}
                         </CardDescription>
                       </div>
                     </div>
-                    <div className="shrink-0">{getStatusBadge(license.status)}</div>
+                    <div className="shrink-0 scale-90 sm:scale-100 origin-right">{getStatusBadge(license.status)}</div>
                   </div>
                 </CardHeader>
-                <CardContent className="px-5 pb-4 pt-0">
-                  <div className="grid gap-3 md:grid-cols-2 mb-3 text-xs sm:text-sm">
-                    <div>
-                      <p className="text-[11px] text-slate-500">License Number</p>
-                      <p className="text-sm font-semibold text-slate-900 break-all">{license.licenseNumber || 'N/A'}</p>
+                <CardContent className="px-4 sm:px-5 pb-4 pt-0">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-6 mb-4 p-3 bg-slate-50/50 rounded-lg border border-slate-100">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">License Number</p>
+                      <p className="text-xs sm:text-sm font-semibold text-slate-900 break-all">{license.licenseNumber || 'N/A'}</p>
                     </div>
-                    <div>
-                      <p className="text-[11px] text-slate-500">Issue Date</p>
-                      <p className="text-sm text-slate-900">
-                        {new Date(license.issueDate).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[11px] text-slate-500">Expiry Date</p>
-                      <p className="text-sm text-slate-900">
-                        {new Date(license.expiryDate).toLocaleDateString()}
-                      </p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Issued</p>
+                        <p className="text-xs sm:text-sm font-medium text-slate-900">
+                          {new Date(license.issueDate).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Expiry</p>
+                        <p className="text-xs sm:text-sm font-medium text-slate-900">
+                          {new Date(license.expiryDate).toLocaleDateString()}
+                        </p>
+                      </div>
                     </div>
                     {(() => {
                       const status = (license.status || '').toLowerCase()
                       const showActions = (status === 'active' || status === 'approved') && (license.applicationStatus === 'approved')
                       if (!showActions) return null
                       return (
-                        <div>
-                          <p className="text-[11px] text-slate-500">Verification URL</p>
-                          <p className="text-[11px] font-mono break-all">
-                            <Link href={license.verificationUrl} className="text-blue-700 underline">
+                        <div className="sm:col-span-2 min-w-0">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Verification URL</p>
+                          <p className="text-[10px] font-mono break-all leading-relaxed">
+                            <Link href={license.verificationUrl} className="text-blue-700 underline hover:text-blue-800 transition-colors">
                               {license.verificationUrl}
                             </Link>
                           </p>
@@ -440,38 +464,37 @@ export default function MyLicenses() {
                         <>
                           {showActions && (
                             <>
-                              <> 
-                                <Button size="sm" className="h-8 px-3 text-xs" asChild>
-                                  <Link href={`/dashboard/licenses/${license.backendId || license.id}`}>
-                                    <QrCode className="h-3 w-3 mr-1.5" />
-                                    View QR
-                                  </Link>
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-8 px-3 text-xs"
-                                  onClick={() => handleDownloadCertificate(license)}
-                                  disabled={downloadingId === (license.backendId || license.id)}
-                                >
-                                  <Download className="h-3 w-3 mr-1.5" />
-                                  {downloadingId === (license.backendId || license.id) ? "Downloading..." : "Certificate"}
-                                </Button>
-                                {String(license.type || '').toLowerCase().includes('professional') && (
-                                  <>
-                                    <Button size="sm" variant="outline" className="h-8 px-3 text-xs" asChild>
-                                      <Link href={`/dashboard/professional-license/upgrade`}>
-                                        Upgrade
-                                      </Link>
-                                    </Button>
-                                    <Button size="sm" variant="outline" className="h-8 px-3 text-xs" asChild>
-                                      <Link href={`/dashboard/professional-license/upgrade-to-practicing`}>
-                                        Upgrade to Practicing
-                                      </Link>
-                                    </Button>
-                                  </>
-                                )}
-                              </>
+                              <Button size="sm" className="h-8 px-3 text-[11px] sm:text-xs font-bold shadow-sm" asChild>
+                                <Link href={`/dashboard/licenses/${license.backendId || license.id}`}>
+                                  <QrCode className="h-3.5 w-3.5 mr-1.5" />
+                                  View QR
+                                </Link>
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-3 text-[11px] sm:text-xs font-bold border-blue-200 text-blue-700 hover:bg-blue-50"
+                                asChild
+                              >
+                                <Link href={`/dashboard/payments/certificate/${license.backendId || license.id}?section=${resolveSection(license)}&category=${resolveCategory(license)}`}>
+                                  <Download className="h-3.5 w-3.5 mr-1.5" />
+                                  Certificate
+                                </Link>
+                              </Button>
+                              {String(license.type || '').toLowerCase().includes('professional') && (
+                                <div className="flex flex-wrap gap-2 w-full sm:w-auto mt-1 sm:mt-0">
+                                  <Button size="sm" variant="outline" className="h-8 px-3 text-[11px] sm:text-xs font-bold flex-1 sm:flex-none" asChild>
+                                    <Link href={`/dashboard/professional-license/upgrade`}>
+                                      Upgrade
+                                    </Link>
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="h-8 px-3 text-[11px] sm:text-xs font-bold flex-1 sm:flex-none" asChild>
+                                    <Link href={`/dashboard/professional-license/upgrade-to-practicing`}>
+                                      Upgrade to Practicing
+                                    </Link>
+                                  </Button>
+                                </div>
+                              )}
                             </>
                           )}
 
@@ -479,12 +502,12 @@ export default function MyLicenses() {
                             <Button
                               size="sm"
                               variant="outline"
-                              className="h-8 px-3 text-xs"
+                              className="h-8 px-3 text-[11px] sm:text-xs font-bold w-full sm:w-auto border-red-200 text-red-600 hover:bg-red-50"
                               asChild
                             >
                               <Link href={`/dashboard/licenses/${license.backendId || license.id}/renew`}>
-                                <CreditCard className="h-3 w-3 mr-1.5" />
-                                Renew
+                                <CreditCard className="h-3.5 w-3.5 mr-1.5" />
+                                Renew License
                               </Link>
                             </Button>
                           )}

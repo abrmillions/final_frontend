@@ -11,8 +11,9 @@ import Link from "next/link"
 import QRScanner from "@/components/qr-scanner"
 import djangoApi, { licensesApi } from "@/lib/api/django-client"
 import { parseQRData } from "@/lib/qr/qr-utils"
-// added now
-// import { useToast } from "@/hooks/use-toast"
+import { useAuth } from "@/lib/auth/auth-context"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { useToast } from "@/hooks/use-toast"
 
 function QueryReader({ onParams }: { onParams: (p: { licenseNumber?: string; token?: string }) => void }) {
   const searchParams = useSearchParams()
@@ -32,6 +33,8 @@ export default function VerifyPage() {
   const [isSearching, setIsSearching] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { maintenanceMode } = useAuth()
+  const { toast } = useToast()
 
   const localVerify = async (targetNumber?: string) => {
     const num = String(targetNumber || licenseNumber || '').trim()
@@ -57,7 +60,6 @@ export default function VerifyPage() {
               data: {
                 licenseId: target.id,
                 licenseNumber: num,
-                holderName: target.holder_name || (target.owner && target.owner.email) || '',
                 companyName: target.data?.companyName || '',
                 licenseType: target.license_type || '',
                 issueDate: target.issued_date || target.data?.issueDate || 'N/A',
@@ -114,7 +116,6 @@ export default function VerifyPage() {
           data: {
             licenseId: result.id,
             licenseNumber: result.license_number,
-            holderName: result.holder_name || "N/A",
             companyName: result.company_name || "",
             licenseType: formatLicenseType(result.license_type, result.subtype),
             issueDate: result.issued_date || "N/A",
@@ -128,7 +129,13 @@ export default function VerifyPage() {
         const ok = await localVerify(options.licenseNumber)
         if (!ok) {
           setVerificationResult({ found: false, data: null })
-          setError(result.detail || "The license number you entered was not found in the database.")
+          const errorMsg = result.detail || "The license number you entered was not found in the database."
+          setError(errorMsg)
+          toast({
+            title: "Verification Failed",
+            description: errorMsg,
+            variant: "destructive",
+          })
         }
       }
     } catch (error: any) {
@@ -138,7 +145,13 @@ export default function VerifyPage() {
           found: false,
           data: null,
         })
-        setError(error?.message || 'An error occurred during verification.')
+        const errorMsg = error?.message || 'An error occurred during verification.'
+        setError(errorMsg)
+        toast({
+          title: "Verification Error",
+          description: errorMsg,
+          variant: "destructive",
+        })
       }
     } finally {
       setIsSearching(false)
@@ -163,10 +176,12 @@ export default function VerifyPage() {
 
   const handleQRScan = (qrData: string) => {
     const parsed = parseQRData(qrData)
-    if (parsed?.licenseNumber) {
-      setLicenseNumber(parsed.licenseNumber)
+    const licNum = parsed?.licenseNumber || parsed?.licenseId || (parsed?.type === 'text' ? parsed.value : null)
+    
+    if (licNum) {
+      setLicenseNumber(licNum)
       setShowScanner(false)
-      void runVerification({ licenseNumber: parsed.licenseNumber })
+      void runVerification({ licenseNumber: licNum })
     } else {
       setError('Could not extract a valid license number from the QR code.')
       setShowScanner(false)
@@ -191,10 +206,20 @@ export default function VerifyPage() {
               <p className="text-xs text-muted-foreground">License Verification Portal</p>
             </div>
           </Link>
-          <Button variant="outline" asChild>
+          <Button variant="outlineBlueHover" asChild>
             <Link href="/">Back to Home</Link>
           </Button>
         </div>
+        {maintenanceMode && (
+          <div className="w-full">
+            <div className="container mx-auto px-4 pb-3">
+              <Alert className="border-amber-300 bg-amber-50 text-amber-800">
+                <AlertTitle>Maintenance in Progress</AlertTitle>
+                <AlertDescription>Verification may be temporarily unavailable during updates.</AlertDescription>
+              </Alert>
+            </div>
+          </div>
+        )}
       </header>
 
       <div className="container mx-auto px-4 py-16 max-w-4xl">
@@ -288,10 +313,6 @@ export default function VerifyPage() {
                     <div>
                       <span className="text-muted-foreground">License Number:</span>
                       <p className="font-medium text-foreground">{verificationResult.data.licenseNumber}</p>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Holder Name:</span>
-                      <p className="font-medium text-foreground">{verificationResult.data.holderName}</p>
                     </div>
                     <div>
                       <span className="text-muted-foreground">License Type:</span>

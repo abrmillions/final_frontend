@@ -7,7 +7,7 @@
  import { authApi } from "@/lib/api/django-client"
  
  export default function OAuth2Callback() {
-   const [message, setMessage] = useState("Processing Google sign-in...")
+  const [message, setMessage] = useState("Processing Google sign-in...")
  
    useEffect(() => {
      try {
@@ -16,34 +16,51 @@
        const code = url.searchParams.get("code")
        const error = url.searchParams.get("error")
        if (error) {
-         setMessage(`Google returned error: ${error}`)
+        const map: Record<string, string> = {
+          oauth_not_configured: "Google OAuth not configured in backend",
+          missing_code: "Authorization code missing; try starting from Register → Continue with Google",
+        }
+        setMessage(map[error] || `Google returned error: ${error}`)
          return
        }
        if (!code) {
          setMessage("Missing authorization code")
          return
        }
-       const target = `${DJANGO_API_URL}/api/users/google/callback/?mode=json&code=${encodeURIComponent(code)}`
+       const redirectUri = `${window.location.origin}/oauth2callback`
+       const body = JSON.stringify({ code, redirect_uri: redirectUri, mode: "json" })
+       
        ;(async () => {
          try {
-           const resp = await fetch(target, { method: "GET", headers: { Accept: "application/json" } })
-           if (!resp.ok) {
-             const t = await resp.text().catch(() => "")
-             setMessage(t || "Failed to complete sign-in")
-             return
-           }
-           const data = await resp.json()
-           if (data?.access && data?.refresh) {
-             setTokens({ access: data.access, refresh: data.refresh })
-             try {
-               await authApi.getCurrentUser()
-             } catch {}
-             window.location.replace("/dashboard")
+           // Use POST directly as it's more standard for code-to-token exchange in this app
+           const resp = await fetch("/api/users/google/callback/", {
+             method: "POST",
+             headers: { "Content-Type": "application/json", Accept: "application/json" },
+             body,
+           })
+           
+           if (resp.status === 200) {
+             const ct = resp.headers.get("content-type") || ""
+             if (/application\/json/i.test(ct)) {
+               const data = await resp.json()
+               if (data?.access && data?.refresh) {
+                 setTokens({ access: data.access, refresh: data.refresh })
+                 try { await authApi.getCurrentUser() } catch {}
+                 window.location.replace("/dashboard")
+                 return
+               } else {
+                 setMessage(data?.detail || "Tokens missing in response from backend")
+               }
+             } else {
+               const text = await resp.text().catch(() => "")
+               setMessage(text || `Unexpected response format (Status: ${resp.status})`)
+             }
            } else {
-             setMessage("Missing tokens in response")
+             const data = await resp.json().catch(() => ({}))
+             setMessage(data?.detail || `Authentication failed. Status: ${resp.status}`)
            }
          } catch (e: any) {
-           setMessage(e?.message || "Unexpected error")
+           setMessage(e?.message || "Connection error. Ensure the server is running.")
          }
        })()
      } catch (e: any) {

@@ -15,7 +15,7 @@ import { setTokens } from "@/lib/config/django-api"
 
 export function LoginForm() {
   const router = useRouter()
-  const { login } = useAuth()
+  const { login, maintenanceMode } = useAuth()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
@@ -62,6 +62,27 @@ export function LoginForm() {
     const trimmedEmail = email.trim()
     try {
       await login(trimmedEmail, password)
+
+      // Fetch the updated user from localStorage to check role
+      let userRole = ""
+      try {
+        if (typeof window !== "undefined") {
+          const stored = localStorage.getItem("clms_user")
+          if (stored) {
+            const user = JSON.parse(stored)
+            userRole = (user?.role || "").toLowerCase()
+          }
+        }
+      } catch (e) { /* ignore */ }
+
+      // If maintenance mode is ON and user is NOT an admin, log them out immediately
+      if (maintenanceMode && userRole !== "admin") {
+        const { authApi } = await import("@/lib/api/django-client")
+        await authApi.logout()
+        setError("The system is currently in maintenance.")
+        setIsLoading(false)
+        return
+      }
 
       console.log("[clms] Login successful")
       // Immediately navigate; do not wait for any background requests
@@ -146,35 +167,6 @@ export function LoginForm() {
 
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? "Signing in..." : "Sign In"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full flex items-center justify-center gap-2"
-            disabled={isLoading}
-            aria-label="Continue with Google"
-            onClick={() => {
-              if (typeof window === "undefined") return
-              const clientId = (process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "650560089798-q076f69msk5mi2iuvi1hb6ptja4oiqb7.apps.googleusercontent.com").trim()
-              const redirectUri = `${window.location.origin}/oauth2callback`
-              const scope = "openid email profile"
-              const authUrl = "https://accounts.google.com/o/oauth2/v2/auth?" + new URLSearchParams({
-                client_id: clientId,
-                redirect_uri: redirectUri,
-                response_type: "code",
-                scope,
-                access_type: "offline",
-                prompt: "consent",
-              }).toString()
-              window.location.href = authUrl
-            }}
-          >
-            <img
-              src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
-              alt="Google"
-              className="w-5 h-5"
-            />
-            <span>Continue with Google</span>
           </Button>
         </form>
       </CardContent>

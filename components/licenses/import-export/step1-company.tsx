@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { PhotoUpload } from "@/components/photo-upload"
+import { useEffect, useState } from "react"
 
 interface Step1Props {
   data: any
@@ -15,8 +16,21 @@ interface Step1Props {
 }
 
 export function ImportExportStep1({ data, updateData, onNext }: Step1Props) {
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  const hasPhoto = Boolean(
+    data?.company_representative_photo &&
+    ((typeof data.company_representative_photo === 'string' && data.company_representative_photo.trim().length > 0) ||
+     (typeof File !== 'undefined' && data.company_representative_photo instanceof File))
+  )
+  useEffect(() => {
+    if (hasPhoto && photoError) setPhotoError(null)
+  }, [hasPhoto, photoError])
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (!hasPhoto) {
+      setPhotoError("Company representative photo is required")
+      return
+    }
     onNext()
   }
 
@@ -112,15 +126,21 @@ export function ImportExportStep1({ data, updateData, onNext }: Step1Props) {
 
       <div className="border-t pt-6">
         <PhotoUpload
-          label="Enter Your 4x4 size  Photo/Company Representative Photo"
+          label="Enter Your 4x3 size Photo/Company Representative Photo"
           required={true}
+          requireAspectRatio={[4, 3]}
+          minWidthPx={400}
+          minHeightPx={300}
           onPhotoUpload={handlePhotoUpload}
           photoUrl={typeof data.company_representative_photo === 'string' ? data.company_representative_photo : undefined}
         />
+        {photoError && (
+          <p className="mt-2 text-sm text-destructive">{photoError}</p>
+        )}
       </div>
 
       <div className="flex justify-end gap-3 pt-4 border-t">
-        <Button type="submit">Continue</Button>
+        <Button type="submit" disabled={!hasPhoto}>Continue</Button>
       </div>
     </form>
   )

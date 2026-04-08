@@ -14,6 +14,8 @@ import { ImportExportStep4 } from "@/components/licenses/import-export/step4-doc
 import { ImportExportStep5 } from "@/components/licenses/import-export/step5-review"
 import { applicationsApi, documentsApi } from "@/lib/api/django-client"
 import { useToast } from "@/hooks/use-toast"
+import { useAuth } from "@/lib/auth/auth-context"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 type ImportExportFormData = {
   companyName: string
@@ -24,6 +26,7 @@ type ImportExportFormData = {
   email: string
   phone: string
   permitType: string
+  permitDetails: string
   duration: string
   customsOffice: string
   purposeOfImport: string
@@ -35,7 +38,11 @@ type ImportExportFormData = {
 export default function ImportExportApplyPage() {
   const router = useRouter()
   const { toast } = useToast()
+  const { maintenanceMode, user } = useAuth()
+  const isAdmin = (user?.role || "").toLowerCase() === "admin"
+  const disabled = maintenanceMode && !isAdmin
   const [currentStep, setCurrentStep] = useState(1)
+  const [submitting, setSubmitting] = useState(false)
   const [formData, setFormData] = useState<ImportExportFormData>({
     // Company Info
     companyName: "",
@@ -48,6 +55,7 @@ export default function ImportExportApplyPage() {
 
     // Permit Details
     permitType: "",
+    permitDetails: "",
     duration: "",
     customsOffice: "",
     purposeOfImport: "",
@@ -58,6 +66,7 @@ export default function ImportExportApplyPage() {
     // Documents
     company_representative_photo: null,
     documents: {
+      companyPhoto: null,
       companyRegistration: null,
       taxCertificate: null,
       customsLicense: null,
@@ -93,9 +102,16 @@ export default function ImportExportApplyPage() {
   }
 
   const handleSubmit = async () => {
+    if (submitting) return
+    setSubmitting(true)
     try {
+      if (disabled) {
+        toast({ title: "Maintenance in Progress", description: "Submissions are temporarily disabled.", variant: "destructive" })
+        return
+      }
       const payload: any = {
         license_type: "Import/Export License",
+        subtype: formData.permitDetails || "General Importer",
         data: { ...formData, company_representative_photo: undefined },
       }
       if (formData.company_representative_photo instanceof File) {
@@ -105,10 +121,11 @@ export default function ImportExportApplyPage() {
       const appId = String(application?.id || "")
       const docs = formData.documents || {}
       const labelMap: Record<string, string> = {
-        companyRegistration: "Company Registration",
-        taxCertificate: "Tax Certificate",
-        customsLicense: "Customs License",
-        itemSpecifications: "Item Specifications",
+        companyPhoto: "Company Logo/Photo",
+        companyRegistration: "Company Registration Certificate",
+        taxCertificate: "Tax Registration Certificate",
+        customsLicense: "Customs License/Authorization",
+        itemSpecifications: "Item Specifications & Catalogs",
         proformaInvoice: "Proforma Invoice",
       }
       try {
@@ -139,25 +156,27 @@ export default function ImportExportApplyPage() {
     } catch (err: any) {
       console.error("[clms] Submit error:", err)
       alert(err?.message || "Failed to submit application")
+    } finally {
+      // keep submitting true to avoid double submission while navigating
     }
   }
 
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="container mx-auto px-4 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center shrink-0">
               <Package className="w-6 h-6 text-primary-foreground" />
             </div>
-            <div>
-              <h1 className="text-lg font-semibold text-foreground">Import/Export Permit Application</h1>
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold text-foreground truncate">Import/Export Permit Application</h1>
               <p className="text-xs text-muted-foreground">
                 Step {currentStep} of {steps.length}
               </p>
             </div>
           </div>
-          <Button variant="outline" asChild>
+          <Button variant="outlineBlueHover" size="sm" asChild className="w-full sm:w-auto">
             <Link href="/dashboard">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Dashboard
@@ -167,24 +186,30 @@ export default function ImportExportApplyPage() {
       </header>
 
       <div className="container mx-auto px-4 py-8 max-w-4xl">
+        {disabled && (
+          <Alert className="mb-8 border-amber-300 bg-amber-50 text-amber-800">
+            <AlertTitle>Maintenance in Progress</AlertTitle>
+            <AlertDescription>Submissions are temporarily disabled.</AlertDescription>
+          </Alert>
+        )}
         <div className="mb-8">
-          <Progress value={progress} className="h-2 mb-4" />
-          <div className="grid grid-cols-5 gap-2">
+          <Progress value={progress} className="h-2 mb-6" />
+          <div className="grid grid-cols-5 gap-1 sm:gap-2">
             {steps.map((step) => (
               <div key={step.number} className="text-center">
                 <div
-                  className={`w-10 h-10 rounded-full mx-auto mb-2 flex items-center justify-center font-semibold text-sm ${
-                    currentStep >= step.number ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                  className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full mx-auto mb-2 flex items-center justify-center font-bold text-xs sm:text-sm transition-colors ${
+                    currentStep >= step.number ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted text-muted-foreground"
                   }`}
                 >
                   {step.number}
                 </div>
                 <div
-                  className={`text-xs font-medium ${
-                    currentStep >= step.number ? "text-foreground" : "text-muted-foreground"
+                  className={`text-[9px] sm:text-xs font-bold uppercase tracking-tighter sm:tracking-wider line-clamp-1 ${
+                    currentStep >= step.number ? "text-primary" : "text-muted-foreground"
                   }`}
                 >
-                  {step.title}
+                  {step.title.split(" ")[0]}
                 </div>
               </div>
             ))}

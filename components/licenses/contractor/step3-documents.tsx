@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
 import { Upload, FileText, CheckCircle2 } from "lucide-react"
 import { useState } from "react"
+import { useAuth } from "@/lib/auth/auth-context"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 interface Step3Props {
   data: any
@@ -17,12 +19,16 @@ interface Step3Props {
 
 export function ContractorStep3({ data, updateData, onNext, onBack }: Step3Props) {
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, boolean>>({})
+  const { maintenanceMode, user } = useAuth()
+  const isAdmin = (user?.role || "").toLowerCase() === "admin"
+  const disabled = maintenanceMode && !isAdmin
 
   const documents = [
     // { key: "companyPhoto", label: "Company Logo/Photo", required: true },
     { key: "nationalIdCopy", label: "National ID Copy", required: true },
     // { key: "companyRegistration", label: "Company Registration Certificate", required: true },
     { key: "taxCertificate", label: "Tax Registration Certificate", required: true },
+    { key: "degreeCertificate", label: "Degree Certificate", required: true },
     { key: "experienceCertificate", label: "Experience Certificates", required: true },
     { key: "financialStatement", label: "Financial Statement (Last 2 years)", required: true },
   ]
@@ -38,6 +44,7 @@ export function ContractorStep3({ data, updateData, onNext, onBack }: Step3Props
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (disabled) return
     onNext()
   }
 
@@ -45,12 +52,18 @@ export function ContractorStep3({ data, updateData, onNext, onBack }: Step3Props
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="space-y-4">
+      {disabled && (
+        <Alert className="border-amber-300 bg-amber-50 text-amber-800">
+          <AlertTitle>Maintenance in Progress</AlertTitle>
+          <AlertDescription>Submissions are temporarily disabled.</AlertDescription>
+        </Alert>
+      )}
+      <div className="grid grid-cols-1 gap-4">
         {documents.map((doc) => (
           <Card key={doc.key}>
             <CardContent className="p-4">
               <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center shrink-0">
                   {uploadedFiles[doc.key] ? (
                     <CheckCircle2 className="w-6 h-6 text-accent" />
                   ) : (
@@ -69,12 +82,13 @@ export function ContractorStep3({ data, updateData, onNext, onBack }: Step3Props
                       variant={uploadedFiles[doc.key] ? "outline" : "default"}
                       size="sm"
                       onClick={() => document.getElementById(`file-${doc.key}`)?.click()}
+                      disabled={disabled}
                     >
                       <Upload className="w-4 h-4 mr-2" />
                       {uploadedFiles[doc.key] ? "Replace File" : "Upload File"}
                     </Button>
                     {uploadedFiles[doc.key] && (
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-xs text-muted-foreground truncate max-w-50">
                         {(() => {
                           const v = data.documents?.[doc.key]
                           if (v && typeof v === 'object' && 'name' in v) return String((v as File).name)
@@ -89,6 +103,7 @@ export function ContractorStep3({ data, updateData, onNext, onBack }: Step3Props
                     className="hidden"
                     accept={doc.key === 'companyPhoto' ? 'image/*' : '.pdf,.jpg,.jpeg,.png'}
                     onChange={(e) => handleFileUpload(doc.key, e.target.files)}
+                    disabled={disabled}
                   />
                 </div>
               </div>
@@ -97,11 +112,11 @@ export function ContractorStep3({ data, updateData, onNext, onBack }: Step3Props
         ))}
       </div>
 
-      <div className="flex justify-between gap-3 pt-4 border-t">
-        <Button type="button" variant="outline" onClick={onBack}>
+      <div className="flex flex-col sm:flex-row justify-between gap-3 pt-4 border-t">
+        <Button type="button" variant="outline" onClick={onBack} className="w-full sm:w-auto order-2 sm:order-1">
           Back
         </Button>
-        <Button type="submit" disabled={!allRequiredUploaded}>
+        <Button type="submit" disabled={!allRequiredUploaded || disabled} className="w-full sm:w-auto order-1 sm:order-2">
           Continue to Review
         </Button>
       </div>

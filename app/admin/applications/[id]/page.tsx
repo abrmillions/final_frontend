@@ -4,7 +4,7 @@ import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
+  Card, 
   CardContent,
   CardDescription,
   CardHeader,
@@ -20,25 +20,28 @@ import {
   XCircle,
   FileText,
   Download,
+  Eye,
   MessageSquare,
   Loader2,
   User,
   Phone,
   Mail,
-  FileArchive,
   History,
+  Search,
 } from "lucide-react";
+import { VerificationResultDisplay } from "@/components/verification-result-display";
+import { computePriorityChips } from "../../../../verification/chips/priorityFields";
 import { useToast } from "@/hooks/use-toast";
-import { generateApplicationPDF, generateLicensePDF } from "@/lib/downloads/pdf-generator";
+import {
+  generateApplicationPDF,
+  generateLicensePDF,
+} from "@/lib/downloads/pdf-generator";
 import { downloadPDF } from "@/lib/downloads/file-download";
-import { requestApplicationInfo } from "@/lib/button-actions";
 import {
   applicationsApi,
   documentsApi,
-  applicationsApiEx,
 } from "@/lib/api/django-client";
 import { settingsApi } from "@/lib/api/django-client";
-import { licensesApi } from "@/lib/api/django-client";
 
 export default function ApplicationReview({
   params,
@@ -53,57 +56,109 @@ export default function ApplicationReview({
   const [status, setStatus] = useState("pending");
   const [comments, setComments] = useState("");
   const [reviewNotes, setReviewNotes] = useState("");
-  const [isDownloading, setIsDownloading] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
   const [isRequestingInfo, setIsRequestingInfo] = useState(false);
-  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyingDocId, setVerifyingDocId] = useState<string | null>(null);
+  const [verifiedInSession, setVerifiedInSession] = useState<Set<string>>(
+    new Set(),
+  );
   const [verificationSummary, setVerificationSummary] = useState<any | null>(
     null,
   );
   const [verifyEnabled, setVerifyEnabled] = useState<boolean>(false);
   const [license, setLicense] = useState<any | null>(null);
+  const [showSlowLoad, setShowSlowLoad] = useState(false);
 
   useEffect(() => {
+    let isMounted = true;
+    
+    // Safety timer for slow loads
+    const slowLoadTimer = setTimeout(() => {
+      if (isMounted && isLoading) {
+        setShowSlowLoad(true);
+      }
+    }, 8000); // 8 seconds
+
     const fetchData = async () => {
       try {
         setIsLoading(true);
-        const appData = await applicationsApi.getDetail(id);
+        console.log(`[admin] Fetching application ${id}...`);
+        
+        // Use Promise.all to fetch application and settings in parallel
+        // Increase timeout for this critical call to 15s
+        const [appData, settingsData] = await Promise.all([
+          applicationsApi.getDetail(id).catch(err => {
+            console.error(`[admin] Failed to fetch application ${id}:`, err);
+            throw err;
+          }),
+          settingsApi.get().catch(err => {
+            console.warn("[admin] Failed to fetch settings:", err);
+            return { documentVerificationEnabled: false };
+          })
+        ]);
+
+        if (!isMounted) return;
+
+        console.log(`[admin] Application ${id} loaded:`, appData);
         setApplication(appData);
         setStatus(appData.status);
-        try {
-          if (String(appData.status || "").toLowerCase() === "approved") {
-            const lic = await applicationsApi.getLicense(id);
-            setLicense(lic);
-          } else {
-            setLicense(null);
-          }
-        } catch {}
-        try {
-          const docsData = await documentsApi.list({ application: id });
-          setDocuments(
-            Array.isArray(docsData) ? docsData : docsData.results || [],
-          );
-        } catch (docErr: any) {
-          setDocuments([]);
-        }
-        try {
-          const s = await settingsApi.get();
-          setVerifyEnabled(!!s.documentVerificationEnabled);
-        } catch {}
-      } catch (error) {
-        console.error("Failed to load application data:", error);
-        toast({
-          title: "Error",
-          description: "Failed to load application data",
-          variant: "destructive",
-        });
-      } finally {
+        setVerifyEnabled(!!settingsData.documentVerificationEnabled);
+        
+        // Critical data loaded, stop the main spinner
         setIsLoading(false);
+        setShowSlowLoad(false);
+        clearTimeout(slowLoadTimer);
+
+        // Conditional fetches based on application status (background)
+        // 1. Fetch license if approved
+        if (String(appData.status || "").toLowerCase() === "approved") {
+          applicationsApi.getLicense(id)
+            .then(lic => {
+              if (isMounted) setLicense(lic);
+            })
+            .catch(err => {
+              console.warn(`[admin] Failed to fetch license for application ${id}:`, err);
+              if (isMounted) setLicense(null);
+            });
+        }
+
+        // 2. Fetch documents
+        documentsApi.list({ application: id })
+          .then(docsData => {
+            if (isMounted) {
+              const docsList = Array.isArray(docsData) ? docsData : docsData.results || [];
+              setDocuments(docsList);
+            }
+          })
+          .catch(err => {
+            console.warn(`[admin] Failed to fetch documents for application ${id}:`, err);
+            if (isMounted) setDocuments([]);
+          });
+
+      } catch (error: any) {
+        console.error("[admin] Critical error loading application data:", error);
+        if (isMounted) {
+          toast({
+            title: "Error",
+            description: error?.message || "Failed to load application data",
+            variant: "destructive",
+          });
+          setApplication(null);
+          setIsLoading(false);
+          setShowSlowLoad(false);
+          clearTimeout(slowLoadTimer);
+        }
       }
     };
+
     fetchData();
-  }, [id, toast]);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(slowLoadTimer);
+    };
+  }, [id]);
 
   const handleApprove = async () => {
     setIsApproving(true);
@@ -150,18 +205,35 @@ export default function ApplicationReview({
           application?.data?.company_name ||
           "",
         holderName:
-          lic?.data?.holderName ||
           application?.data?.applicantName ||
+          application?.applicant_name ||
+          lic.holder_full_name ||
+          lic?.data?.holderName ||
           application?.applicant ||
           "",
         registrationNumber: lic.license_number || lic?.data?.registrationNumber,
         issueDate: lic.issued_date,
         expiryDate: lic.expiry_date,
         status: lic.status || "Active",
+        photoUrl: 
+          lic.license_photo_base64 || 
+          lic.license_photo_url || 
+          lic.license_photo || 
+          lic.licensePhoto || 
+          lic?.data?.photoUrl ||
+          application?.data?.profile_photo ||
+          application?.data?.profilePhoto ||
+          application?.data?.applicantPhoto,
       };
       const pdf = await generateLicensePDF(payload as any);
-      downloadPDF(pdf, `License-${payload.registrationNumber || payload.id}.pdf`);
-      toast({ title: "Downloaded", description: "License certificate downloaded." });
+      downloadPDF(
+        pdf,
+        `License-${payload.registrationNumber || payload.id}.pdf`,
+      );
+      toast({
+        title: "Downloaded",
+        description: "License certificate downloaded.",
+      });
     } catch (e: any) {
       toast({
         title: "Download Failed",
@@ -241,111 +313,64 @@ export default function ApplicationReview({
     }
   };
 
-  const handleDownloadAllDocuments = async () => {
-    setIsDownloading(true);
+  const handleVerifySingleDocument = async (docId: string) => {
+    setVerifyingDocId(docId);
     try {
-      const blob = await applicationsApi.downloadDocuments(id);
-      if (blob.type === "application/json") {
-        const text = await blob.text();
-        try {
-          const error = JSON.parse(text);
-          const msg = String(error?.detail || "").trim();
-          if (msg && /not found/i.test(msg)) {
-            toast({
-              title: "No Documents",
-              description: "No documents found for this application.",
-              variant: "destructive",
-            });
-            return;
-          }
-          throw new Error(msg || "Failed to download documents");
-        } catch {
-          if (/not found/i.test(text)) {
-            toast({
-              title: "No Documents",
-              description: "No documents found for this application.",
-              variant: "destructive",
-            });
-            return;
-          }
-          throw new Error(text || "Failed to download documents");
-        }
-      }
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", `application_${id}_documents.zip`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      toast({
-        title: "Downloaded",
-        description: "All documents have been downloaded as a ZIP file.",
-      });
-    } catch (error: any) {
-      console.error("Error downloading documents:", error);
-      toast({
-        title: "Error",
-        description: error.message || "Failed to download documents.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsDownloading(false);
-    }
-  };
-
-  const handleVerifyDocuments = async () => {
-    setIsVerifying(true);
-    try {
-      const res = await applicationsApiEx.verifyDocuments(id);
-      try {
-        setVerificationSummary(res?.summary || null);
-      } catch {
-        setVerificationSummary(null);
-      }
+      await documentsApi.verify(docId);
       const docsData = await documentsApi.list({ application: id });
-      setDocuments(Array.isArray(docsData) ? docsData : docsData.results || []);
+      const newDocs = Array.isArray(docsData) ? docsData : docsData.results || [];
+      setDocuments(newDocs);
+      setVerifiedInSession((prev) => new Set(prev).add(docId));
+      
+      // Recalculate summary
+      const summary = {
+        verified_true: 0,
+        verified_fake: 0,
+        inconclusive: 0,
+        pending: 0,
+        missing: 0,
+        error: 0,
+      };
+      newDocs.forEach((d: any) => {
+        if (verifiedInSession.has(d.id) || d.id === docId) {
+          const st = d.verification_status || "pending";
+          if (st in summary) {
+            (summary as any)[st]++;
+          }
+        }
+      });
+      setVerificationSummary(summary);
+      
       toast({
-        title: "Verification Complete",
-        description: "Document verification finished.",
+        title: "Document Verified",
+        description: "The document has been verified successfully.",
       });
     } catch (error: any) {
       toast({
         title: "Verification Failed",
-        description: error?.message || "Failed to verify documents.",
+        description: error?.message || "Failed to verify document.",
         variant: "destructive",
       });
     } finally {
-      setIsVerifying(false);
-    }
-  };
-
-  const handleDownloadApplicationPDF = async () => {
-    if (!application) return;
-    setIsDownloading(true);
-    try {
-      const pdf = await generateApplicationPDF(application);
-      downloadPDF(pdf, `Application-${application.id}.pdf`);
-      toast({
-        title: "Downloaded",
-        description: "Application report has been downloaded as PDF.",
-      });
-    } catch (error) {
-      console.error("Error generating PDF:", error);
-      toast({
-        title: "Error",
-        description: "Failed to download application.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsDownloading(false);
+      setVerifyingDocId(null);
     }
   };
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="w-8 h-8 animate-spin" />
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        <p className="text-slate-500 animate-pulse">Loading application data...</p>
+        {showSlowLoad && (
+          <div className="flex flex-col items-center gap-2 animate-in fade-in duration-500">
+            <p className="text-sm text-amber-600 font-medium text-center max-w-xs">
+              This is taking longer than usual. The server might be slow or unreachable.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+              Reload Page
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
@@ -365,26 +390,29 @@ export default function ApplicationReview({
 
   return (
     <div className="min-h-screen bg-linear-to-br from-slate-50 to-slate-100">
-      <header className="border-b bg-white">
+      <header className="sticky top-0 z-50 border-b bg-white/80 backdrop-blur-md">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-600 shadow-blue-200 shadow-lg">
                 <Building2 className="h-6 w-6 text-white" />
               </div>
-              <div>
-                <h1 className="text-xl font-bold text-slate-900">
+              <div className="min-w-0">
+                <h1 className="text-xl font-bold text-slate-900 truncate">
                   Review Application
                 </h1>
-                <p className="text-sm text-slate-600">ID: {application.id}</p>
+                <p className="text-sm text-slate-500 font-mono">ID: {application.id}</p>
               </div>
             </div>
-            <Button variant="outline" asChild>
-              <Link href="/admin/applications">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Applications
-              </Link>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outlineBlueHover" size="sm" asChild className="w-full sm:w-auto">
+                <Link href="/admin/applications">
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  <span className="hidden xs:inline">Back to Applications</span>
+                  <span className="xs:hidden">Back</span>
+                </Link>
+              </Button>
+            </div>
           </div>
         </div>
       </header>
@@ -399,21 +427,22 @@ export default function ApplicationReview({
                 <CardTitle>Current Status</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <Badge
                     className={
                       status === "approved"
-                        ? "bg-green-500"
+                        ? "bg-green-500 hover:bg-green-600"
                         : status === "rejected"
-                          ? "bg-red-500"
+                          ? "bg-red-500 hover:bg-red-600"
                           : status === "info_requested"
-                            ? "bg-amber-500"
-                            : "bg-blue-500"
+                            ? "bg-amber-500 hover:bg-amber-600"
+                            : "bg-blue-500 hover:bg-blue-600"
                     }
                   >
                     {status.replace("_", " ").toUpperCase()}
                   </Badge>
-                  <span className="text-sm text-slate-500">
+                  <span className="text-sm text-slate-500 flex items-center gap-1">
+                    <History className="w-4 h-4" />
                     Submitted on{" "}
                     {new Date(application.created_at).toLocaleDateString()}
                   </span>
@@ -427,7 +456,7 @@ export default function ApplicationReview({
                 <CardTitle>Applicant Information</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <Label className="text-slate-500">Applicant Name</Label>
                     <div className="flex items-center gap-2">
@@ -468,37 +497,43 @@ export default function ApplicationReview({
               </CardContent>
             </Card>
 
-          {license && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Issued License</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <Label className="text-slate-500">License Number</Label>
-                    <p className="font-medium">{license.license_number}</p>
+            {license && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Issued License</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-slate-500">License Number</Label>
+                      <p className="font-medium">{license.license_number}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-slate-500">Status</Label>
+                      <Badge className="bg-green-600">
+                        {String(license.status || "active").toUpperCase()}
+                      </Badge>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-slate-500">Issued Date</Label>
+                      <p className="font-medium">
+                        {license.issued_date
+                          ? new Date(license.issued_date).toLocaleDateString()
+                          : "—"}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-slate-500">Expiry Date</Label>
+                      <p className="font-medium">
+                        {license.expiry_date
+                          ? new Date(license.expiry_date).toLocaleDateString()
+                          : "—"}
+                      </p>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-slate-500">Status</Label>
-                    <Badge className="bg-green-600">{String(license.status || "active").toUpperCase()}</Badge>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-slate-500">Issued Date</Label>
-                    <p className="font-medium">
-                      {license.issued_date ? new Date(license.issued_date).toLocaleDateString() : "—"}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-slate-500">Expiry Date</Label>
-                    <p className="font-medium">
-                      {license.expiry_date ? new Date(license.expiry_date).toLocaleDateString() : "—"}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Application Data */}
             <Card>
@@ -526,10 +561,10 @@ export default function ApplicationReview({
                         key={key}
                         className="space-y-1 p-2 border rounded bg-slate-50"
                       >
-                        <Label className="text-xs text-slate-500 uppercase">
+                        <Label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">
                           {key.replace(/([A-Z])/g, " $1").trim()}
                         </Label>
-                        <p className="text-sm font-medium wrap-break-word">
+                        <p className="text-sm font-medium wrap-break-word text-slate-700">
                           {String(value)}
                         </p>
                       </div>
@@ -547,19 +582,6 @@ export default function ApplicationReview({
                   <CardDescription>Uploaded files for review</CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
-                  {documents.length > 0 && verifyEnabled && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleVerifyDocuments}
-                      disabled={isVerifying}
-                    >
-                      {isVerifying ? (
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      ) : null}
-                      Verify Documents
-                    </Button>
-                  )}
                 </div>
                 {verificationSummary && verifyEnabled && (
                   <div className="mt-2 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
@@ -600,61 +622,97 @@ export default function ApplicationReview({
                     documents.map((doc, index) => (
                       <div
                         key={index}
-                        className="flex items-center justify-between p-3 border rounded-lg bg-white"
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border rounded-xl bg-white hover:bg-slate-50 transition-colors shadow-sm"
                       >
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100">
-                            <FileText className="h-5 w-5 text-blue-600" />
+                        <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 border border-blue-100">
+                            <FileText className="h-6 w-6 text-blue-600" />
                           </div>
-                          <div>
-                            <p className="font-medium text-sm">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-slate-900 truncate" title={doc.name || doc.file.split("/").pop()}>
                               {doc.name || doc.file.split("/").pop()}
                             </p>
-                            <p className="text-xs text-slate-500">
-                              {new Date(doc.uploaded_at).toLocaleDateString()}
+                            <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                              <History className="w-3 h-3" />
+                              {new Date(doc.uploaded_at).toLocaleDateString(undefined, {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric'
+                              })}
                             </p>
                             {verifyEnabled &&
                               verificationSummary &&
-                              doc.verification_status && (
-                                <div className="mt-1">
-                                  <Badge
-                                    className={
-                                      doc.verification_status ===
-                                      "verified_true"
-                                        ? "bg-green-600"
-                                        : doc.verification_status ===
-                                            "verified_fake"
-                                          ? "bg-red-600"
+                              doc.verification_status &&
+                              verifiedInSession.has(doc.id) && (
+                                <div className="mt-3 space-y-3">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Badge
+                                      className={
+                                        doc.verification_status ===
+                                        "verified_true"
+                                          ? "bg-green-600 hover:bg-green-700"
                                           : doc.verification_status ===
-                                              "pending"
-                                            ? "bg-amber-500"
-                                            : "bg-slate-600"
-                                    }
-                                  >
-                                    {String(doc.verification_status)
-                                      .replace("_", " ")
-                                      .toUpperCase()}
-                                  </Badge>
-                                  {typeof doc.verification_score ===
-                                    "number" && (
-                                    <span className="ml-2 text-xs text-slate-600">
-                                      Score: {doc.verification_score.toFixed(2)}
-                                    </span>
-                                  )}
+                                              "verified_fake"
+                                            ? "bg-red-600 hover:bg-red-700"
+                                            : doc.verification_status ===
+                                                "pending"
+                                              ? "bg-amber-500 hover:bg-amber-600"
+                                              : doc.verification_status ===
+                                                  "error"
+                                                ? "bg-rose-600 hover:bg-rose-700"
+                                                : "bg-slate-600 hover:bg-slate-700"
+                                      }
+                                    >
+                                      {String(doc.verification_status)
+                                        .replace("_", " ")
+                                        .toUpperCase()}
+                                    </Badge>
+                                    {typeof doc.verification_score ===
+                                      "number" && (
+                                      <span className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
+                                        Confidence:{" "}
+                                        {(doc.verification_score * 100).toFixed(
+                                          1,
+                                        )}
+                                        %
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-200 overflow-hidden">
+                                    <VerificationResultDisplay details={doc.verification_details} />
+                                  </div>
                                 </div>
                               )}
                           </div>
                         </div>
-                        <Button variant="ghost" size="sm" asChild>
-                          <a
-                            href={doc.file}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            <Download className="h-4 w-4 mr-2" />
-                            Download
-                          </a>
-                        </Button>
+                        <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto mt-2 sm:mt-0 pt-2 sm:pt-0 border-t sm:border-t-0">
+                          <Button variant="outline" size="sm" className="flex-1 sm:flex-initial" asChild>
+                            <a
+                              href={doc.file}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <Eye className="h-4 w-4 mr-2" />
+                              View
+                            </a>
+                          </Button>
+                          {verifyEnabled && (
+                            <Button
+                              variant="hoverBlue"
+                              size="sm"
+                              className="flex-1 sm:flex-initial"
+                              onClick={() => handleVerifySingleDocument(doc.id)}
+                              disabled={verifyingDocId === doc.id}
+                            >
+                              {verifyingDocId === doc.id ? (
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              ) : (
+                                <Search className="h-4 w-4 mr-2" />
+                              )}
+                              Verify
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     ))
                   )}
@@ -743,10 +801,7 @@ export default function ApplicationReview({
                     Approve Application
                   </Button>
                   {status === "approved" && (
-                    <Button
-                      className="w-full"
-                      onClick={handleDownloadLicense}
-                    >
+                    <Button className="w-full" onClick={handleDownloadLicense}>
                       <Download className="w-4 h-4 mr-2" />
                       Download License Certificate
                     </Button>
@@ -780,8 +835,6 @@ export default function ApplicationReview({
                 </div>
               </CardContent>
             </Card>
-
-       
           </div>
         </div>
       </main>

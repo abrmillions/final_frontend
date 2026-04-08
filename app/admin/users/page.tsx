@@ -60,11 +60,9 @@ export default function UsersManagement() {
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [showRoleDialog, setShowRoleDialog] = useState(false)
   const [showSuspendDialog, setShowSuspendDialog] = useState(false)
-  const [showPhotoDialog, setShowPhotoDialog] = useState(false)
   const [newUserEmail, setNewUserEmail] = useState("")
   const [newUserName, setNewUserName] = useState("")
   const [error, setError] = useState<string | null>(null)
-  const [photoFile, setPhotoFile] = useState<File | null>(null)
 
   const checkAuthAndFetchUsers = async () => {
     try {
@@ -73,7 +71,7 @@ export default function UsersManagement() {
       const userStr = localStorage.getItem('clms_user')
       if (userStr) {
           const user = JSON.parse(userStr)
-          if (user.role !== 'Admin') {
+          if (String(user.role || "").toLowerCase() !== 'admin') {
               setError("Access Denied: You do not have administrator privileges.")
               setLoading(false)
               return
@@ -91,7 +89,13 @@ export default function UsersManagement() {
             ? String(u.role).toLowerCase()
             : (u.is_staff ? "admin" : "applicant")
         ) as "admin" | "reviewer" | "applicant",
-        status: (u.is_active ? "active" : "suspended") as "active" | "suspended" | "pending",
+        status: (
+          !u.is_active
+            ? "suspended"
+            : !u.email_verified
+              ? "pending"
+              : "active"
+        ) as "active" | "suspended" | "pending",
         joinedDate: u.date_joined ? u.date_joined.split("T")[0] : "N/A",
         licensesCount: u.licenses_count || 0,
       })).filter((u) => !!u.id && u.id !== 'undefined')
@@ -169,12 +173,13 @@ export default function UsersManagement() {
     }
 
     try {
-      // Create user with default password
+      // Create user with default password and mark as verified by default
       await usersApi.create({
         username: newUserEmail.split("@")[0],
         email: newUserEmail,
         first_name: newUserName,
         password: "ChangeMe123!", // Default password
+        email_verified: true,
       })
 
       setShowAddDialog(false)
@@ -204,7 +209,10 @@ export default function UsersManagement() {
 
     try {
       const isStaff = newRole === "admin" || newRole === "reviewer"
-      const payload: any = { is_staff: isStaff }
+      const payload: any = { 
+        role: newRole,
+        is_staff: isStaff 
+      }
       await usersApi.update(selectedUser.id, payload)
       
       setShowRoleDialog(false)
@@ -382,7 +390,7 @@ export default function UsersManagement() {
               </div>
               <div className="flex gap-2">
                 <Select value={roleFilter} onValueChange={setRoleFilter}>
-                  <SelectTrigger className="w-[150px]">
+                  <SelectTrigger className="w-37.5">
                     <SelectValue placeholder="Role" />
                   </SelectTrigger>
                   <SelectContent>
@@ -393,7 +401,7 @@ export default function UsersManagement() {
                   </SelectContent>
                 </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-[150px]">
+                  <SelectTrigger className="w-37.5">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -491,16 +499,6 @@ export default function UsersManagement() {
                                     <Ban className="mr-2 h-4 w-4" />
                                     {user.status === "suspended" ? "Activate User" : "Suspend User"}
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setSelectedUser(user)
-                                      setPhotoFile(null)
-                                      setShowPhotoDialog(true)
-                                    }}
-                                  >
-                                    <Mail className="mr-2 h-4 w-4" />
-                                    Upload Photo
-                                  </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             </td>
@@ -593,79 +591,6 @@ export default function UsersManagement() {
             </div>
           </AlertDialogContent>
         </AlertDialog>
-
-        <Dialog open={showPhotoDialog} onOpenChange={setShowPhotoDialog}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Upload Profile Photo</DialogTitle>
-              <DialogDescription>
-                Select an image to set as the user's profile photo.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="photo">Profile Photo</Label>
-                <Input
-                  id="photo"
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] || null
-                    setPhotoFile(f)
-                  }}
-                />
-                {photoFile && (
-                  <div className="mt-2">
-                    <img
-                      src={URL.createObjectURL(photoFile)}
-                      alt="Preview"
-                      className="h-24 w-24 rounded-md object-cover border"
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setShowPhotoDialog(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={async () => {
-                  if (!selectedUser || !photoFile) {
-                    toast({
-                      title: "No file selected",
-                      description: "Please choose an image to upload.",
-                      variant: "destructive",
-                    })
-                    return
-                  }
-                  try {
-                    await usersApi.update(selectedUser.id, { profile_photo: photoFile })
-                    setShowPhotoDialog(false)
-                    setPhotoFile(null)
-                    checkAuthAndFetchUsers()
-                    toast({
-                      title: "Photo Updated",
-                      description: `${selectedUser.name}'s profile photo has been updated.`,
-                    })
-                  } catch (error: any) {
-                    const msg =
-                      (error?.error?.detail && String(error.error.detail).trim()) ||
-                      (error?.message && String(error.message).trim()) ||
-                      "Could not update the user's photo."
-                    toast({
-                      title: "Upload Failed",
-                      description: msg,
-                      variant: "destructive",
-                    })
-                  }
-                }}
-              >
-                Upload
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
       </div>
     </div>
   )

@@ -18,10 +18,17 @@
 
 - Core modules:
   - Applications: applicant submits forms for Contractor/Professional/Import-Export licenses via dashboard pages like [applications/page.tsx](file:///C:/Users/pc/Downloads/finalyear/Digital_licensing/app/dashboard/applications/page.tsx) and specific apply pages.
-  - Licenses: issuance, renewal, verification; backend serializers/views in [licenses/views.py](file:///C:/Users/pc/Downloads/finalyear/backend/licenses/views.py).
-  - Admin: review and approval through Django Admin, linked from [admin/page.tsx](file:///C:/Users/pc/Downloads/finalyear/Digital_licensing/app/admin/page.tsx).
+  - Licenses: issuance, renewal, verification; backend serializers/views in [licenses/views.py](file:///C:/Users/pc/OneDrive/Telegram%20Desktop/Desktop/final_year/backend/licenses/views.py).
+  - AI Verification: Automated document auditing using Gemini/DeepSeek AI models; logic in [verification.py](file:///C:/Users/pc/OneDrive/Telegram%20Desktop/Desktop/final_year/backend/applications/verification.py).
+  - Payments: Integrated with **Chapa** for secure digital transactions; services in [chapa_service.py](file:///C:/Users/pc/OneDrive/Telegram%20Desktop/Desktop/final_year/backend/payments/services/chapa_service.py).
+  - Contact System: Centralized messaging for user support; models in [contact/models.py](file:///C:/Users/pc/OneDrive/Telegram%20Desktop/Desktop/final_year/backend/contact/models.py).
+  - Notifications: Real-time In-App and Email alerts for status updates; implementation in [notifications.py](file:///C:/Users/pc/OneDrive/Telegram%20Desktop/Desktop/final_year/backend/applications/notifications.py).
+  - Admin: review and approval through Django Admin, linked from [admin/page.tsx](file:///C:/Users/pc/OneDrive/Telegram%20Desktop/Desktop/final_year/Digital_licensing/app/admin/page.tsx).
 - Key endpoints (Django):
-  - Applications: `/api/applications/`, actions: approve/reject/request_info`
+  - Applications: `/api/applications/`, actions: `approve/reject/request_info`
+  - Payments: `/api/payments/create/`, `/api/payments/verify/`
+  - AI Verify: `/api/documents/{id}/verify/`
+  - Contact: `/api/contact/messages/`
   - Licenses: `/api/licenses/`, renew `/api/licenses/{id}/renew/`, verify `/api/licenses/verify/`
   - Documents: `/api/documents/upload/`
 - Frontend utilities:
@@ -169,6 +176,40 @@
    - Step 3:
 4. Expected result:
 5. Notes/Troubleshooting:
+
+#### AI Verification & Auditing (Admin)
+
+- Objective: Automatically verify authenticity of applicant documents.
+- Prerequisites: Application submitted with documents; AI keys configured in [System Settings](file:///C:/Users/pc/OneDrive/Telegram%20Desktop/Desktop/final_year/Digital_licensing/app/admin/settings/page.tsx).
+- Steps:
+  - Open an application in the Admin Review page.
+  - Locate the Documents section and click the **Verify** button next to a file.
+  - Review the AI result (Confidence Score, Extracted Data, and Final Recommendation).
+- Expected result: System returns a "Verified True" or "Verified Fake" status with detailed evidence.
+- Screenshots: Add screenshot of the **Verification Result UI** and the **Confidence Score Badge**.
+
+#### Digital Payments (Chapa)
+
+- Objective: Pay for license fees securely.
+- Prerequisites: Approved application awaiting payment.
+- Steps:
+  - Go to Dashboard → Payments.
+  - Select the pending application and click **Pay with Chapa**.
+  - Complete the transaction on the Chapa hosted page.
+  - Verify payment status is updated to `Completed`.
+- Expected result: Application status changes to `Paid`, allowing license issuance.
+- Screenshots: Add screenshot of the **Payment Checkout Page** and the **Successful Transaction Receipt**.
+
+#### User Support (Contact Page)
+
+- Objective: Send inquiries to the licensing authority.
+- Prerequisites: None (available to public).
+- Steps:
+  - Visit the [Contact Page](file:///C:/Users/pc/OneDrive/Telegram%20Desktop/Desktop/final_year/Digital_licensing/app/contact/page.tsx).
+  - Fill the contact form (Name, Email, Message) and submit.
+  - (Admin) Review and reply to the message from the Admin Dashboard.
+- Expected result: Message is stored in the database and an email reply is sent to the user.
+- Screenshots: Add screenshot of the **Contact Form** and the **Admin Message Inbox**.
 
 ### User Manual: Issuance, Renewal, Verification
 

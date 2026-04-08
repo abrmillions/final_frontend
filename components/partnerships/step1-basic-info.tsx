@@ -49,6 +49,7 @@ export function PartnershipStep1({ data, updateData, onNext }: Step1Props) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="joint-venture">Joint Venture</SelectItem>
+              <SelectItem value="foreign-local">Foreign Partnership (Foreign-Local)</SelectItem>
               <SelectItem value="general-partnership">General Partnership</SelectItem>
               <SelectItem value="consortium">Consortium</SelectItem>
               <SelectItem value="strategic-alliance">Strategic Alliance</SelectItem>

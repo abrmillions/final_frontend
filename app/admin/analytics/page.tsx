@@ -5,7 +5,7 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Building2, ArrowLeft, TrendingUp, TrendingDown, Users, FileText, DollarSign, CheckCircle, Loader2 } from "lucide-react"
+import { Building2, ArrowLeft, TrendingUp, TrendingDown, Users, FileText, Wallet, CheckCircle, Loader2 } from "lucide-react"
 import {
   BarChart,
   Bar,
@@ -45,7 +45,7 @@ export default function AnalyticsDashboard() {
 
   useEffect(() => {
     checkAuthAndFetchAnalytics()
-  }, [])
+  }, [timeRange])
 
   const checkAuthAndFetchAnalytics = async () => {
     try {
@@ -61,7 +61,7 @@ export default function AnalyticsDashboard() {
             }
         }
 
-        const response = await analyticsApi.getDashboard()
+        const response = await analyticsApi.getDashboard(timeRange)
         setData(response)
     } catch (error: any) {
         console.error("Failed to fetch analytics:", error)
@@ -121,22 +121,22 @@ export default function AnalyticsDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      <header className="border-b bg-white">
+    <div className="min-h-screen bg-linear-to-br from-slate-50 to-slate-100">
+      <header className="border-b bg-white sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 shrink-0">
                 <Building2 className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-slate-900">Analytics Dashboard</h1>
+                <h1 className="text-xl font-bold text-slate-900 line-clamp-1">Analytics Dashboard</h1>
                 <p className="text-sm text-slate-600">System performance and insights</p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <Select value={timeRange} onValueChange={setTimeRange}>
-                <SelectTrigger className="w-40">
+                <SelectTrigger className="w-full sm:w-40 h-9">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -146,7 +146,7 @@ export default function AnalyticsDashboard() {
                   <SelectItem value="year">Last Year</SelectItem>
                 </SelectContent>
               </Select>
-              <Button variant="outline" asChild>
+              <Button variant="outlineBlueHover" size="sm" asChild className="w-full sm:w-auto">
                 <Link href="/admin">
                   <ArrowLeft className="h-4 w-4 mr-2" />
                   Back to Admin
@@ -158,7 +158,7 @@ export default function AnalyticsDashboard() {
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-8">
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 mb-8">
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -188,11 +188,17 @@ export default function AnalyticsDashboard() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-medium text-slate-600">Total Revenue</CardTitle>
-                <DollarSign className="h-5 w-5 text-amber-600" />
+                <Wallet className="h-5 w-5 text-amber-600" />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-slate-900">${(data.totalRevenue / 1000).toFixed(1)}K</div>
+              <div className="text-3xl font-bold text-slate-900">
+                {new Intl.NumberFormat("en-ET", {
+                  style: "currency",
+                  currency: "ETB",
+                  maximumFractionDigits: 0,
+                }).format(data.totalRevenue)}
+              </div>
             </CardContent>
           </Card>
 
@@ -220,11 +226,16 @@ export default function AnalyticsDashboard() {
                 <BarChart data={data.applicationTrends}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <XAxis dataKey="month" stroke="#64748B" />
-                  <YAxis stroke="#64748B" />
+                  <YAxis 
+                    stroke="#64748B" 
+                    tickFormatter={(value) => `${value}`}
+                  />
                   <Tooltip
                     contentStyle={{ backgroundColor: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "8px" }}
+                    formatter={(value: any) => [`${new Intl.NumberFormat("en-ET").format(value)} ETB`, "Revenue"]}
                   />
                   <Legend />
+                  <Bar dataKey="active" fill="#3B82F6" name="Active" />
                   <Bar dataKey="approved" fill="#10B981" name="Approved" />
                   <Bar dataKey="rejected" fill="#EF4444" name="Rejected" />
                   <Bar dataKey="pending" fill="#F59E0B" name="Pending" />
@@ -239,7 +250,7 @@ export default function AnalyticsDashboard() {
               <CardDescription>Breakdown by license type</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="h-[300px] flex items-center justify-center">
+              <div className="h-75 flex items-center justify-center">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -264,7 +275,7 @@ export default function AnalyticsDashboard() {
           </Card>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
           <Card>
             <CardHeader>
               <CardTitle>Revenue Growth</CardTitle>
@@ -275,9 +286,13 @@ export default function AnalyticsDashboard() {
                 <LineChart data={data.revenueData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <XAxis dataKey="month" stroke="#64748B" />
-                  <YAxis stroke="#64748B" />
+                  <YAxis 
+                    stroke="#64748B" 
+                    tickFormatter={(value) => `${value}`}
+                  />
                   <Tooltip
                     contentStyle={{ backgroundColor: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "8px" }}
+                    formatter={(value: any) => [`${new Intl.NumberFormat("en-ET").format(value)} ETB`, "Revenue"]}
                   />
                   <Line type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={2} dot={{ r: 4 }} />
                 </LineChart>
@@ -293,19 +308,19 @@ export default function AnalyticsDashboard() {
             <CardContent>
               <div className="space-y-4">
                 {data.processingTimes.map((item: any, index: number) => (
-                  <div key={index} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`h-2 w-2 rounded-full ${index % 2 === 0 ? "bg-blue-500" : "bg-emerald-500"}`} />
-                      <span className="text-sm font-medium text-slate-700">{item.type}</span>
+                  <div key={index} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className={`h-2 w-2 rounded-full shrink-0 ${index % 2 === 0 ? "bg-blue-500" : "bg-emerald-500"}`} />
+                      <span className="text-sm font-medium text-slate-700 truncate">{item.type}</span>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <div className="h-2 w-32 rounded-full bg-slate-100 overflow-hidden">
+                    <div className="flex items-center gap-4 w-full sm:w-auto">
+                      <div className="h-2 flex-1 sm:w-32 rounded-full bg-slate-100 overflow-hidden">
                         <div
                           className={`h-full ${index % 2 === 0 ? "bg-blue-500" : "bg-emerald-500"}`}
                           style={{ width: `${Math.min(item.avgDays * 10, 100)}%` }}
                         />
                       </div>
-                      <span className="text-sm font-medium text-slate-900">{item.avgDays} days</span>
+                      <span className="text-sm font-medium text-slate-900 shrink-0">{item.avgDays} days</span>
                     </div>
                   </div>
                 ))}

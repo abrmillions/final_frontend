@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Upload, X, AlertCircle, CheckCircle2 } from 'lucide-react'
-import Image from 'next/image'
+import NextImage from 'next/image'
 
 interface PhotoUploadProps {
   onPhotoUpload: (file: File) => void
@@ -13,6 +13,10 @@ interface PhotoUploadProps {
   required?: boolean
   maxSizeMB?: number
   photoUrl?: string
+  requireSquare?: boolean
+  requireAspectRatio?: [number, number]
+  minWidthPx?: number
+  minHeightPx?: number
 }
 
 export function PhotoUpload({
@@ -21,6 +25,10 @@ export function PhotoUpload({
   required = true,
   maxSizeMB = 5,
   photoUrl,
+  requireSquare = false,
+  requireAspectRatio,
+  minWidthPx,
+  minHeightPx,
 }: PhotoUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [preview, setPreview] = useState<string | null>(photoUrl || null)
@@ -28,6 +36,7 @@ export function PhotoUpload({
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [warning, setWarning] = useState('')
 
   const maxSizeBytes = maxSizeMB * 1024 * 1024
 
@@ -37,6 +46,7 @@ export function PhotoUpload({
 
     setError('')
     setSuccess('')
+    setWarning('')
 
     // Validate file type
     if (!file.type.startsWith('image/')) {
@@ -51,22 +61,61 @@ export function PhotoUpload({
     }
 
     setIsUploading(true)
-
     try {
-      const reader = new FileReader()
-      reader.onload = (event) => {
-        const base64String = event.target?.result as string
-        setPreview(base64String)
-        setFileName(file.name)
-        onPhotoUpload(file)
-        setSuccess('Photo uploaded successfully')
-        setTimeout(() => setSuccess(''), 3000)
+      const objectUrl = URL.createObjectURL(file)
+      const img = new window.Image()
+      img.onload = () => {
+        try {
+          const w = img.naturalWidth
+          const h = img.naturalHeight
+          if (requireSquare && w !== h) {
+            setWarning('Photo is not square. Square (1:1) is recommended.')
+          }
+          if (requireAspectRatio && Array.isArray(requireAspectRatio)) {
+            const [rw, rh] = requireAspectRatio
+            const target = rw / rh
+            const actual = w / h
+            const tol = 0.02
+            if (Math.abs(actual - target) > tol) {
+              setWarning(`Photo is not ${rw}:${rh} ratio. ${rw}:${rh} is recommended.`)
+            }
+          }
+          if (minWidthPx && w < minWidthPx) {
+            setError(`Photo width must be at least ${minWidthPx}px`)
+            URL.revokeObjectURL(objectUrl)
+            setIsUploading(false)
+            return
+          }
+          if (minHeightPx && h < minHeightPx) {
+            setError(`Photo height must be at least ${minHeightPx}px`)
+            URL.revokeObjectURL(objectUrl)
+            setIsUploading(false)
+            return
+          }
+          const reader = new FileReader()
+          reader.onload = (event) => {
+            const base64String = event.target?.result as string
+            setPreview(base64String)
+            setFileName(file.name)
+            onPhotoUpload(file)
+            setSuccess('Photo uploaded successfully')
+            setTimeout(() => setSuccess(''), 3000)
+          }
+          reader.readAsDataURL(file)
+        } finally {
+          URL.revokeObjectURL(objectUrl)
+          setIsUploading(false)
+        }
       }
-      reader.readAsDataURL(file)
+      img.onerror = () => {
+        setError('Failed to read image')
+        URL.revokeObjectURL(objectUrl)
+        setIsUploading(false)
+      }
+      img.src = objectUrl
     } catch (err) {
       setError('Failed to process image')
       console.error('[clms] Photo upload error:', err)
-    } finally {
       setIsUploading(false)
     }
   }
@@ -102,12 +151,18 @@ export function PhotoUpload({
           <AlertDescription className="text-green-800">{success}</AlertDescription>
         </Alert>
       )}
+      {!error && warning && (
+        <Alert className="border-amber-200 bg-amber-50">
+          <AlertCircle className="h-4 w-4 text-amber-600" />
+          <AlertDescription className="text-amber-800">{warning}</AlertDescription>
+        </Alert>
+      )}
 
       {preview ? (
         <div className="space-y-4">
           <div className="relative w-full max-w-xs">
             <div className="aspect-square relative rounded-lg overflow-hidden border-2 border-border bg-muted">
-              <Image
+              <NextImage
                 src={preview || "/placeholder.svg"}
                 alt="Preview"
                 fill

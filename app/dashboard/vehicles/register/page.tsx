@@ -10,18 +10,24 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { Truck, ArrowLeft, Upload, FileText, CheckCircle2 } from "lucide-react"
+import { Truck, ArrowLeft, Upload, FileText, CheckCircle2, Plus } from "lucide-react"
 import Link from "next/link"
 import { vehiclesApi } from "@/lib/api/django-client"
 import { useToast } from "@/hooks/use-toast"
+import { useAuth } from "@/lib/auth/auth-context"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 export default function RegisterVehiclePage() {
   const router = useRouter()
   const { toast } = useToast()
+  const { maintenanceMode, user } = useAuth()
+  const isAdmin = (user?.role || "").toLowerCase() === "admin"
+  const disabled = maintenanceMode && !isAdmin
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, boolean>>({})
   const [docFiles, setDocFiles] = useState<Record<string, File | null>>({})
   const [formData, setFormData] = useState({
+    registrationCategory: "commercial-vehicle",
     vehicleType: "",
     manufacturer: "",
     model: "",
@@ -61,6 +67,10 @@ export default function RegisterVehiclePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (disabled) {
+      toast({ title: "Maintenance in Progress", description: "Submissions are temporarily disabled.", variant: "destructive" })
+      return
+    }
     setIsSubmitting(true)
 
     try {
@@ -135,16 +145,16 @@ export default function RegisterVehiclePage() {
       } catch {}
       // Navigate immediately; background uploads will continue
       router.push("/dashboard/vehicles")
-    } catch (error) {
+    } catch (error: any) {
       try {
-        const msg = ((error as any)?.error?.detail && String((error as any).error.detail).trim()) || ((error as any)?.message && String((error as any).message).trim()) || ""
-        const lc = msg.toLowerCase()
-        if (lc.includes("already registered a vehicle")) {
-          toast({ title: "Already Registered", description: "You have already registered a vehicle with this account." })
-          router.push("/dashboard/vehicles")
-          return
-        }
-        toast({ title: "Error", description: msg || "Failed to register vehicle.", variant: "destructive" })
+        const msg = (error?.error?.detail && String(error.error.detail).trim()) || (error?.message && String(error.message).trim()) || ""
+        const tb = error?.error?.traceback
+        toast({ 
+          title: "Error", 
+          description: msg || "Failed to register vehicle.", 
+          variant: "destructive" 
+        })
+        if (tb) console.error("Backend traceback:", tb)
       } catch {
         toast({ title: "Error", description: "Failed to register vehicle.", variant: "destructive" })
       }
@@ -165,20 +175,24 @@ export default function RegisterVehiclePage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="container mx-auto px-4 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-              <Truck className="w-6 h-6 text-primary-foreground" />
+            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center shrink-0">
+              <Plus className="w-6 h-6 text-primary-foreground" />
             </div>
-            <div>
-              <h1 className="text-lg font-semibold text-foreground">Register Vehicle/Equipment</h1>
-              <p className="text-xs text-muted-foreground">Add to your equipment registry</p>
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold text-foreground truncate">
+                Register New Vehicle
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                Add to your equipment registry
+              </p>
             </div>
           </div>
-          <Button variant="outline" asChild>
+          <Button variant="outlineBlueHover" size="sm" asChild className="w-full sm:w-auto">
             <Link href="/dashboard/vehicles">
               <ArrowLeft className="w-4 h-4 mr-2" />
-              Back
+              Back to Vehicles
             </Link>
           </Button>
         </div>
@@ -186,15 +200,37 @@ export default function RegisterVehiclePage() {
 
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <form onSubmit={handleSubmit} className="space-y-6">
+          {disabled && (
+            <Alert className="border-amber-300 bg-amber-50 text-amber-800">
+              <AlertTitle>Maintenance in Progress</AlertTitle>
+              <AlertDescription>Submissions are temporarily disabled.</AlertDescription>
+            </Alert>
+          )}
           <Card>
             <CardHeader>
               <CardTitle>Vehicle Information</CardTitle>
               <CardDescription>Basic details about the vehicle or equipment</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="vehicleType">Vehicle Type *</Label>
+                  <Label htmlFor="registrationCategory">Registration Category *</Label>
+                  <Select
+                    value={formData.registrationCategory}
+                    onValueChange={(value) => setFormData((prev) => ({ ...prev, registrationCategory: value, vehicleType: "" }))}
+                  >
+                    <SelectTrigger id="registrationCategory">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="commercial-vehicle">Commercial Vehicle ($150)</SelectItem>
+                      <SelectItem value="heavy-machinery">Heavy Machinery ($250)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="vehicleType">Vehicle/Equipment Type *</Label>
                   <Select
                     value={formData.vehicleType}
                     onValueChange={(value) => setFormData((prev) => ({ ...prev, vehicleType: value }))}
@@ -203,16 +239,30 @@ export default function RegisterVehiclePage() {
                       <SelectValue placeholder="Select type" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="excavator">Excavator</SelectItem>
-                      <SelectItem value="bulldozer">Bulldozer</SelectItem>
-                      <SelectItem value="crane">Crane</SelectItem>
-                      <SelectItem value="dump-truck">Dump Truck</SelectItem>
-                      <SelectItem value="concrete-mixer">Concrete Mixer</SelectItem>
-                      <SelectItem value="loader">Loader</SelectItem>
-                      <SelectItem value="grader">Grader</SelectItem>
-                      <SelectItem value="compactor">Compactor</SelectItem>
-                      <SelectItem value="forklift">Forklift</SelectItem>
-                      <SelectItem value="other">Other Equipment</SelectItem>
+                      {formData.registrationCategory === "heavy-machinery" ? (
+                        <>
+                          <SelectItem value="excavator">Excavator</SelectItem>
+                          <SelectItem value="bulldozer">Bulldozer</SelectItem>
+                          <SelectItem value="crane">Crane</SelectItem>
+                          <SelectItem value="loader">Loader</SelectItem>
+                          <SelectItem value="grader">Grader</SelectItem>
+                          <SelectItem value="compactor">Compactor</SelectItem>
+                          <SelectItem value="forklift">Forklift</SelectItem>
+                          <SelectItem value="drilling-rig">Drilling Rig</SelectItem>
+                          <SelectItem value="paver">Paver</SelectItem>
+                        </>
+                      ) : (
+                        <>
+                          <SelectItem value="pickup">Pickup Truck</SelectItem>
+                          <SelectItem value="dump-truck">Dump Truck</SelectItem>
+                          <SelectItem value="concrete-mixer">Concrete Mixer</SelectItem>
+                          <SelectItem value="van">Commercial Van</SelectItem>
+                          <SelectItem value="truck">Heavy Truck (Semi)</SelectItem>
+                          <SelectItem value="trailer">Trailer</SelectItem>
+                          <SelectItem value="bus">Commercial Bus</SelectItem>
+                        </>
+                      )}
+                      <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -326,7 +376,7 @@ export default function RegisterVehiclePage() {
               <CardDescription>Owner and insurance information</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="ownerName">Owner Name/Company *</Label>
                   <Input
@@ -371,7 +421,7 @@ export default function RegisterVehiclePage() {
                   />
                 </div>
 
-                <div className="space-y-2 md:col-span-2">
+                <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="currentProject">Current Project Assignment</Label>
                   <Input
                     id="currentProject"
@@ -438,11 +488,11 @@ export default function RegisterVehiclePage() {
             </CardContent>
           </Card>
 
-          <div className="flex justify-end gap-3">
-            <Button type="button" variant="outline" asChild>
+          <div className="flex flex-col sm:flex-row justify-end gap-3 pt-4">
+            <Button type="button" variant="outline" asChild className="w-full sm:w-auto order-2 sm:order-1">
               <Link href="/dashboard/vehicles">Cancel</Link>
             </Button>
-            <Button type="submit" disabled={!allRequiredUploaded || isSubmitting}>
+            <Button type="submit" disabled={!allRequiredUploaded || isSubmitting || disabled} className="w-full sm:w-auto order-1 sm:order-2">
               {isSubmitting ? "Registering..." : "Register Vehicle"}
             </Button>
           </div>

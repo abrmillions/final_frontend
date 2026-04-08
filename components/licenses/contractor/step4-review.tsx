@@ -3,18 +3,40 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { CheckCircle2 } from "lucide-react"
+import { useAuth } from "@/lib/auth/auth-context"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 interface Step4Props {
   data: any
   onBack: () => void
   onSubmit: () => void
+  hasActiveApplication?: boolean
 }
 
-export function ContractorStep4({ data, onBack, onSubmit }: Step4Props) {
+export function ContractorStep4({ data, onBack, onSubmit, hasActiveApplication }: Step4Props) {
+  const { maintenanceMode, user } = useAuth()
+  const isAdmin = (user?.role || "").toLowerCase() === "admin"
+  const disabled = maintenanceMode && !isAdmin
   return (
     <div className="space-y-6">
+      {disabled && (
+        <Alert className="border-amber-300 bg-amber-50 text-amber-800">
+          <CheckCircle2 className="w-5 h-5 text-amber-700" />
+          <AlertTitle>Maintenance in Progress</AlertTitle>
+          <AlertDescription>Submissions are temporarily disabled.</AlertDescription>
+        </Alert>
+      )}
+      {hasActiveApplication && (
+        <Alert className="border-amber-300 bg-amber-50 text-amber-800">
+          <CheckCircle2 className="w-5 h-5 text-amber-700" />
+          <AlertTitle>Warning</AlertTitle>
+          <AlertDescription>
+            You already have an active application for this license type.
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="bg-accent/10 border border-accent/20 rounded-lg p-4 flex items-start gap-3">
-        <CheckCircle2 className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
+        <CheckCircle2 className="w-5 h-5 text-accent shrink-0 mt-0.5" />
         <div>
           <p className="text-sm font-medium text-foreground">Review your application</p>
           <p className="text-xs text-muted-foreground mt-1">
@@ -127,11 +149,11 @@ export function ContractorStep4({ data, onBack, onSubmit }: Step4Props) {
         </div>
       </div>
 
-      <div className="flex justify-between gap-3 pt-4 border-t">
-        <Button type="button" variant="outline" onClick={onBack}>
+      <div className="flex flex-col sm:flex-row justify-between gap-3 pt-4 border-t">
+        <Button type="button" variant="outline" onClick={onBack} className="w-full sm:w-auto order-2 sm:order-1">
           Back
         </Button>
-        <Button onClick={onSubmit} size="lg">
+        <Button onClick={onSubmit} size="lg" disabled={disabled} className="w-full sm:w-auto order-1 sm:order-2">
           Submit Application
         </Button>
       </div>

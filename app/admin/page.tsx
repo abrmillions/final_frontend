@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ClipboardList, Users, Building2, FileText, TrendingUp, Settings, Loader2 } from "lucide-react"
+import { ClipboardList, Users, Building2, FileText, TrendingUp, Settings, Loader2, Mail } from "lucide-react"
 import { applicationsApi } from "@/lib/api/django-client"
 import { useToast } from "@/hooks/use-toast"
 import { DJANGO_API_URL } from "@/lib/config/django-api"
@@ -29,8 +29,9 @@ export default function AdminDashboard() {
         const userStr = localStorage.getItem('clms_user')
         if (userStr) {
             const user = JSON.parse(userStr)
-            if (user.role !== 'Admin') {
-                setError("Access Denied: You do not have administrator privileges.")
+            const role = String(user.role || "").toLowerCase()
+            if (role !== 'admin' && role !== 'reviewer') {
+                setError("Access Denied: You do not have staff privileges.")
                 setIsLoading(false)
                 return
             }
@@ -41,12 +42,12 @@ export default function AdminDashboard() {
       } catch (error: any) {
         // Handle 403 specifically
         if (error?.status === 403 || error?.response?.status === 403 || error?.message?.includes("Permission denied")) {
-             setError("Access Denied: You do not have administrator privileges.")
+             setError("Access Denied: You do not have staff privileges.")
         } else if (error?.status === 401 || /Authentication credentials were not provided/i.test(String(error?.message || ""))) {
-             setError("Authentication required. Please sign in as an administrator.")
+             setError("Authentication required. Please sign in as a staff member.")
              toast({
                 title: "Sign In Required",
-                description: "Please sign in to access the Admin Dashboard.",
+                description: "Please sign in to access the Dashboard.",
                 variant: "destructive"
              })
              try {
@@ -90,27 +91,27 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      <header className="border-b bg-white">
+    <div className="min-h-screen bg-linear-to-br from-slate-50 to-slate-100">
+      <header className="border-b bg-white sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 shrink-0">
                 <Building2 className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-slate-900">Admin Portal</h1>
+                <h1 className="text-xl font-bold text-slate-900 line-clamp-1">Admin Portal</h1>
                 <p className="text-sm text-slate-600">Construction License Management</p>
               </div>
             </div>
-              <div className="flex gap-2">
-                <Button variant="outline" asChild>
-                  <Link href="/dashboard">User Portal</Link>
-                </Button>
-                <Button variant="outline" asChild>
-                  <Link href={`${DJANGO_API_URL}/admin/`} target="_blank">Django Admin</Link>
-                </Button>
-              </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <Button variant="outline" size="sm" asChild className="flex-1 sm:flex-none">
+                <Link href="/dashboard">User Portal</Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild className="flex-1 sm:flex-none">
+                <Link href={`${DJANGO_API_URL}/admin/`} target="_blank">Django Admin</Link>
+              </Button>
+            </div>
           </div>
         </div>
       </header>
@@ -118,11 +119,11 @@ export default function AdminDashboard() {
 
       <main className="container mx-auto px-4 py-8">
         <div className="mb-8">
-          <h2 className="text-3xl font-bold text-slate-900">Dashboard Overview</h2>
-          <p className="text-slate-600 mt-2">Manage applications and system settings</p>
+          <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">Dashboard Overview</h2>
+          <p className="text-slate-600 mt-2 text-sm sm:text-base">Manage applications and system settings</p>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 mb-8">
+        <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 mb-8">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-slate-600">Pending Applications</CardTitle>
@@ -132,7 +133,7 @@ export default function AdminDashboard() {
                   <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
               ) : (
                   <>
-                    <div className="text-3xl font-bold text-blue-600">{stats.pending}</div>
+                    <div className="text-2xl sm:text-3xl font-bold text-blue-600">{stats.pending}</div>
                     <p className="text-xs text-slate-500 mt-1">Awaiting review</p>
                   </>
               )}
@@ -148,14 +149,14 @@ export default function AdminDashboard() {
                   <Loader2 className="h-8 w-8 animate-spin text-amber-600" />
               ) : (
                   <>
-                    <div className="text-3xl font-bold text-amber-600">{stats.under_review}</div>
+                    <div className="text-2xl sm:text-3xl font-bold text-amber-600">{stats.under_review}</div>
                     <p className="text-xs text-slate-500 mt-1">In progress</p>
                   </>
               )}
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="sm:col-span-2 lg:col-span-1">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-slate-600">Approved Today</CardTitle>
             </CardHeader>
@@ -164,7 +165,7 @@ export default function AdminDashboard() {
                   <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
               ) : (
                   <>
-                    <div className="text-3xl font-bold text-emerald-600">{stats.approved_today}</div>
+                    <div className="text-2xl sm:text-3xl font-bold text-emerald-600">{stats.approved_today}</div>
                     <p className="text-xs text-slate-500 mt-1">Completed applications</p>
                   </>
               )}
@@ -172,7 +173,7 @@ export default function AdminDashboard() {
           </Card>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
               <div className="flex items-center gap-3">
@@ -214,6 +215,25 @@ export default function AdminDashboard() {
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader>
               <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100">
+                  <Building2 className="h-5 w-5 text-blue-600" />
+                </div>
+                <div>
+                  <CardTitle>Partnerships</CardTitle>
+                  <CardDescription>Review partnership registrations</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Button asChild variant="outline" className="w-full bg-transparent">
+                <Link href="/admin/partnerships">View Partnerships</Link>
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardHeader>
+              <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-100">
                   <TrendingUp className="h-5 w-5 text-purple-600" />
                 </div>
@@ -245,6 +265,25 @@ export default function AdminDashboard() {
             <CardContent>
               <Button asChild variant="outline" className="w-full bg-transparent">
                 <Link href="/admin/reports">Generate Reports</Link>
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100">
+                  <Mail className="h-5 w-5 text-blue-600" />
+                </div>
+                <div>
+                  <CardTitle>Contact Inbox</CardTitle>
+                  <CardDescription>Support messages and replies</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Button asChild variant="outline" className="w-full bg-transparent">
+                <Link href="/admin/contact">Manage Contact</Link>
               </Button>
             </CardContent>
           </Card>

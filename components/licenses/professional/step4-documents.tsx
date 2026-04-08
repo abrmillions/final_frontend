@@ -23,7 +23,6 @@ export function ProfessionalStep4({ data, updateData, onNext, onBack }: Step4Pro
     { key: "degreeCertificate", label: "Degree Certificate", required: true },
     { key: "transcripts", label: "Academic Transcripts", required: true },
     { key: "experienceLetter", label: "Experience/Employment Letter", required: true },
-    // { key: "professionalPhoto", label: "Professional Passport Photo", required: true },
     { key: "previousLicense", label: "Previous License (if applicable)", required: false },
   ]
 
@@ -54,7 +53,7 @@ export function ProfessionalStep4({ data, updateData, onNext, onBack }: Step4Pro
           <Card key={doc.key}>
             <CardContent className="p-4">
               <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center shrink-0">
                   {uploadedFiles[doc.key] ? (
                     <CheckCircle2 className="w-6 h-6 text-accent" />
                   ) : (
@@ -97,7 +96,7 @@ export function ProfessionalStep4({ data, updateData, onNext, onBack }: Step4Pro
                 </div>
               </div>
             </CardContent>
-          </Card>
+           </Card>
         ))}
       </div>
 

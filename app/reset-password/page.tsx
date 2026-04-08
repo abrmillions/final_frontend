@@ -74,9 +74,9 @@ export default function ResetPasswordPage() {
               <label className="block text-sm mb-1">Confirm password</label>
               <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} type="password" required />
             </div>
-            <div className="flex gap-2">
-              <Button type="submit">Reset password</Button>
-              <Button variant="secondary" onClick={() => router.push('/login')}>Back to login</Button>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button type="submit" className="w-full sm:w-auto">Reset password</Button>
+              <Button variant="secondary" className="w-full sm:w-auto" onClick={() => router.push('/login')}>Back to login</Button>
             </div>
           </form>
         </CardContent>

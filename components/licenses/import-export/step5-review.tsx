@@ -3,6 +3,8 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { CheckCircle2 } from "lucide-react"
+import { useAuth } from "@/lib/auth/auth-context"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 interface Step5Props {
   data: any
@@ -11,14 +13,24 @@ interface Step5Props {
 }
 
 export function ImportExportStep5({ data, onBack, onSubmit }: Step5Props) {
+  const { maintenanceMode, user } = useAuth()
+  const isAdmin = (user?.role || "").toLowerCase() === "admin"
+  const disabled = maintenanceMode && !isAdmin
   const calculateTotalValue = () => {
     return data.items?.reduce((sum: number, item: any) => sum + (Number.parseFloat(item.value) || 0), 0).toFixed(2)
   }
 
   return (
     <div className="space-y-6">
+      {disabled && (
+        <Alert className="border-amber-300 bg-amber-50 text-amber-800">
+          <CheckCircle2 className="w-5 h-5 text-amber-700" />
+          <AlertTitle>Maintenance in Progress</AlertTitle>
+          <AlertDescription>Submissions are temporarily disabled.</AlertDescription>
+        </Alert>
+      )}
       <div className="bg-accent/10 border border-accent/20 rounded-lg p-4 flex items-start gap-3">
-        <CheckCircle2 className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
+        <CheckCircle2 className="w-5 h-5 text-accent shrink-0 mt-0.5" />
         <div>
           <p className="text-sm font-medium text-foreground">Review your permit application</p>
           <p className="text-xs text-muted-foreground mt-1">
@@ -58,6 +70,10 @@ export function ImportExportStep5({ data, onBack, onSubmit }: Step5Props) {
             <div>
               <span className="text-muted-foreground">Permit Type:</span>
               <p className="font-medium text-foreground">{data.permitType}</p>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Permit Details:</span>
+              <p className="font-medium text-foreground">{data.permitDetails}</p>
             </div>
             <div>
               <span className="text-muted-foreground">Duration:</span>
@@ -148,7 +164,7 @@ export function ImportExportStep5({ data, onBack, onSubmit }: Step5Props) {
         <Button type="button" variant="outline" onClick={onBack}>
           Back
         </Button>
-        <Button onClick={onSubmit} size="lg">
+        <Button onClick={onSubmit} size="lg" disabled={disabled}>
           Submit Application
         </Button>
       </div>

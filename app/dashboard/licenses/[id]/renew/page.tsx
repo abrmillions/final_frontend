@@ -52,51 +52,54 @@ export default function RenewLicense() {
   const selectedOption = renewalOptions.find((opt) => opt.value === renewalPeriod)
 
   const handlePayment = async () => {
-    if (!cardNumber || !cardName || !cardExpiry || !cardCvv) {
-      toast({
-        title: "Missing Information",
-        description: "Please fill in all payment details.",
-        variant: "destructive",
-      })
-      return
-    }
-
     try {
-      toast({ title: "Payment Processing", description: "Your payment is being processed..." })
       const price = renewalOptions.find((o) => o.value === renewalPeriod)?.price || 0
-      const res = await fetch("/api/payments/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: price, cardNumber, expiryDate: cardExpiry, cvv: cardCvv }),
-      })
-      const json = await res.json()
-      if (!res.ok || !json?.success) {
-        throw new Error(json?.error || "Payment processing failed")
-      }
-
-      const client = await import("@/lib/api/django-client")
-      const meta = {
-        application_id: applicationId,
+      
+      const { paymentsApi: api } = await import("@/lib/api/django-client")
+      
+      const metadata = {
+        purpose: "renewal",
         license_id: id,
+        application_id: applicationId,
         renewal_period: renewalPeriod,
-        transaction_id: json.transactionId,
       }
-      await client.paymentsApi.create({
-        amount: price,
-        currency: "USD",
-        status: "completed",
-        metadata: meta,
-      })
 
-      setStep(3)
-      toast({ title: "Payment Successful", description: "Your renewal payment has been recorded." })
+      const chapaResponse = await api.initializeChapa({
+        amount: price,
+        currency: "ETB",
+        metadata,
+      })
+      
+      if (chapaResponse?.status === "success" && chapaResponse?.data?.checkout_url) {
+        toast({ 
+          title: "Payment Initialized! 🚀", 
+          description: "Redirecting to Chapa checkout...",
+          variant: "default",
+        })
+        
+        // Save current license ID and path to verify after redirect back
+        if (typeof window !== "undefined") {
+          localStorage.setItem("clms_pending_payment_lic", String(id))
+          localStorage.setItem("clms_pending_payment_tx", chapaResponse.data.tx_ref)
+          localStorage.setItem("clms_pending_payment_purpose", "renewal")
+          if (chapaResponse.data.checkout_url) {
+            localStorage.setItem("clms_pending_payment_url", chapaResponse.data.checkout_url)
+          }
+        }
+
+        setTimeout(() => {
+          window.location.href = chapaResponse.data.checkout_url
+        }, 1000)
+      } else {
+        throw new Error(chapaResponse?.message || "Failed to initialize payment with Chapa")
+      }
     } catch (e: any) {
       toast({ title: "Payment Failed", description: e?.message || "Payment processing failed", variant: "destructive" })
     }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+    <div className="min-h-screen bg-linear-to-br from-slate-50 to-slate-100">
       <header className="border-b bg-white">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
@@ -109,7 +112,7 @@ export default function RenewLicense() {
                 <p className="text-sm text-slate-600">{license.id}</p>
               </div>
             </div>
-            <Button variant="outline" asChild>
+            <Button variant="outlineBlueHover" asChild>
               <Link href={`/dashboard/licenses/${id}`}>
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to License
@@ -145,7 +148,7 @@ export default function RenewLicense() {
                         <Label htmlFor={option.value} className="flex-1 cursor-pointer">
                           <div className="flex justify-between items-center">
                             <span className="font-medium">{option.label}</span>
-                            <span className="text-lg font-bold text-blue-600">${option.price}</span>
+                            <span className="text-lg font-bold text-blue-600">{option.price} ETB</span>
                           </div>
                           <p className="text-sm text-slate-500">
                             New expiry:{" "}
@@ -169,7 +172,7 @@ export default function RenewLicense() {
                       <p className="font-medium text-slate-900">Total Amount</p>
                       <p className="text-sm text-slate-600">Including processing fees</p>
                     </div>
-                    <p className="text-3xl font-bold text-blue-600">${selectedOption?.price}</p>
+                    <p className="text-3xl font-bold text-blue-600">{selectedOption?.price} ETB</p>
                   </div>
                 </div>
 
@@ -210,76 +213,26 @@ export default function RenewLicense() {
                     </div>
                     <div className="text-right">
                       <p className="text-sm text-slate-600">Amount Due</p>
-                      <p className="text-2xl font-bold text-blue-600">${selectedOption?.price}</p>
+                      <p className="text-2xl font-bold text-blue-600">{selectedOption?.price} ETB</p>
                     </div>
                   </div>
                 </div>
 
-                <div>
-                  <Label className="mb-3 block">Payment Method</Label>
-                  <RadioGroup value={paymentMethod} onValueChange={setPaymentMethod}>
-                    <div className="flex items-center space-x-3 border rounded-lg p-4">
-                      <RadioGroupItem value="card" id="card" />
-                      <Label htmlFor="card" className="flex-1 cursor-pointer flex items-center gap-2">
-                        <CreditCard className="h-5 w-5" />
-                        Credit / Debit Card
-                      </Label>
-                    </div>
-                  </RadioGroup>
-                </div>
-
-                {paymentMethod === "card" && (
-                  <div className="space-y-4">
-                    <div>
-                      <Label htmlFor="cardNumber">Card Number</Label>
-                      <Input
-                        id="cardNumber"
-                        placeholder="1234 5678 9012 3456"
-                        value={cardNumber}
-                        onChange={(e) => setCardNumber(e.target.value)}
-                        maxLength={19}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="cardName">Cardholder Name</Label>
-                      <Input
-                        id="cardName"
-                        placeholder="John Smith"
-                        value={cardName}
-                        onChange={(e) => setCardName(e.target.value)}
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="cardExpiry">Expiry Date</Label>
-                        <Input
-                          id="cardExpiry"
-                          placeholder="MM/YY"
-                          value={cardExpiry}
-                          onChange={(e) => setCardExpiry(e.target.value)}
-                          maxLength={5}
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="cardCvv">CVV</Label>
-                        <Input
-                          id="cardCvv"
-                          placeholder="123"
-                          type="password"
-                          value={cardCvv}
-                          onChange={(e) => setCardCvv(e.target.value)}
-                          maxLength={4}
-                        />
-                      </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+                  <div className="flex items-start gap-3 text-amber-800">
+                    <CheckCircle className="h-5 w-5 mt-0.5" />
+                    <div className="text-sm">
+                      <p className="font-semibold">Ready to Renew</p>
+                      <p>You will be redirected to Chapa's secure checkout to complete your renewal payment of {selectedOption?.price} ETB.</p>
                     </div>
                   </div>
-                )}
+                </div>
 
                 <div className="flex items-start space-x-2 pt-4">
                   <Checkbox id="terms" />
                   <Label htmlFor="terms" className="text-sm text-slate-600 leading-relaxed">
-                    I agree to the terms and conditions for license renewal and authorize the payment of $
-                    {selectedOption?.price}
+                    I agree to the terms and conditions for license renewal and authorize the payment of{" "}
+                    {selectedOption?.price} ETB
                   </Label>
                 </div>
 
@@ -288,7 +241,7 @@ export default function RenewLicense() {
                     Back
                   </Button>
                   <Button className="flex-1" onClick={handlePayment}>
-                    Pay ${selectedOption?.price}
+                    Pay {selectedOption?.price} ETB & Continue
                   </Button>
                 </div>
               </CardContent>
@@ -308,11 +261,13 @@ export default function RenewLicense() {
                 <p className="text-slate-600 mb-8">
                   New expiry date:{" "}
                   <span className="font-semibold">
-                    {new Date(
-                      new Date(license.expiryDate).setFullYear(
-                        new Date(license.expiryDate).getFullYear() + Number.parseInt(renewalPeriod),
-                      ),
-                    ).toLocaleDateString()}
+                    {(() => {
+                      const base = license.expiryDate ? new Date(license.expiryDate) : new Date()
+                      const yrs = Number.parseInt(renewalPeriod || "1")
+                      const d = new Date(base)
+                      d.setFullYear(base.getFullYear() + (isNaN(yrs) ? 1 : yrs))
+                      return d.toLocaleDateString()
+                    })()}
                   </span>
                 </p>
                 <div className="space-y-3">

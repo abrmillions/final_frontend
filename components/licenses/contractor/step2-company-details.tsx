@@ -120,9 +120,13 @@ export function ContractorStep2({ data, updateData, onNext, onBack }: Step2Props
               <SelectValue placeholder="Select license type" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="grade-a">Grade 1 - Large Projects</SelectItem>
-              <SelectItem value="grade-b">Grade 2 - Medium Projects</SelectItem>
-              <SelectItem value="grade-c">Grade 3 - Small Projects</SelectItem>
+              <SelectItem value="grade-1">Grade 1 - Large Projects</SelectItem>
+              <SelectItem value="grade-2">Grade 2 - Medium Projects</SelectItem>
+              <SelectItem value="grade-3">Grade 3 - Small Projects</SelectItem>
+              <SelectItem value="grade-4">Grade 4</SelectItem>
+              <SelectItem value="grade-5">Grade 5</SelectItem>
+              <SelectItem value="grade-6">Grade 6</SelectItem>
+              <SelectItem value="grade-7">Grade 7</SelectItem>
               <SelectItem value="specialized">Specialized Contractor</SelectItem>
             </SelectContent>
           </Select>
@@ -150,11 +154,11 @@ export function ContractorStep2({ data, updateData, onNext, onBack }: Step2Props
         </div>
       </div>
 
-      <div className="flex justify-between gap-3 pt-4 border-t">
-        <Button type="button" variant="outline" onClick={onBack}>
+      <div className="flex flex-col sm:flex-row justify-between gap-3 pt-4 border-t">
+        <Button type="button" variant="outline" onClick={onBack} className="w-full sm:w-auto order-2 sm:order-1">
           Back
         </Button>
-        <Button type="submit">Continue</Button>
+        <Button type="submit" className="w-full sm:w-auto order-1 sm:order-2">Continue</Button>
       </div>
     </form>
   )

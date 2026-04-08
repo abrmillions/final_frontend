@@ -10,7 +10,7 @@ export const DJANGO_API_URL =
 // Toggle whether the frontend should rewrite backend absolute URLs to same-origin proxy paths.
 // Set NEXT_PUBLIC_USE_PROXY=1 in environment to enable proxy rewriting.
 export const NEXT_PUBLIC_USE_PROXY =
-  (process.env.NEXT_PUBLIC_USE_PROXY || "0") === "1";
+  (process.env.NEXT_PUBLIC_USE_PROXY || "1") === "1";
 
 export const DJANGO_ENDPOINTS = {
   // Auth endpoints
@@ -50,6 +50,7 @@ export const DJANGO_ENDPOINTS = {
 
   // Application endpoints
   applications: {
+    base: `${DJANGO_API_URL}/api/applications/`,
     list: `${DJANGO_API_URL}/api/applications/`,
     create: `${DJANGO_API_URL}/api/applications/`,
     detail: (id: string) => `${DJANGO_API_URL}/api/applications/${id}/`,
@@ -78,7 +79,7 @@ export const DJANGO_ENDPOINTS = {
   // Partnership endpoints
   partnerships: {
     list: `${DJANGO_API_URL}/api/partnerships/`,
-    create: `${DJANGO_API_URL}/api/partnerships/create/`,
+    create: `${DJANGO_API_URL}/api/partnerships/`,
     detail: (id: string) => `${DJANGO_API_URL}/api/partnerships/${id}/`,
     confirm: (id: string) => `${DJANGO_API_URL}/api/partnerships/${id}/confirm/`,
     approve: (id: string) => `${DJANGO_API_URL}/api/partnerships/${id}/approve/`,
@@ -93,10 +94,12 @@ export const DJANGO_ENDPOINTS = {
   
   // Payment endpoints
   payments: {
-    list: `${DJANGO_API_URL}/api/payments/`,
-    create: `${DJANGO_API_URL}/api/payments/`,
-    detail: (id: string) => `${DJANGO_API_URL}/api/payments/${id}/`,
-    update: (id: string) => `${DJANGO_API_URL}/api/payments/${id}/`,
+    list: `${DJANGO_API_URL}/api/payments/manage/`,
+    create: `${DJANGO_API_URL}/api/payments/manage/`,
+    detail: (id: string) => `${DJANGO_API_URL}/api/payments/manage/${id}/`,
+    update: (id: string) => `${DJANGO_API_URL}/api/payments/manage/${id}/`,
+    chapaCreate: `${DJANGO_API_URL}/api/payments/create/`,
+    chapaVerify: (tx_ref: string) => `${DJANGO_API_URL}/api/payments/verify/${tx_ref}/`,
   },
 
   // Vehicle endpoints
@@ -124,6 +127,15 @@ export const DJANGO_ENDPOINTS = {
   // System settings endpoints
   system: {
     settings: `${DJANGO_API_URL}/api/system/settings/`,
+    maintenance: `${DJANGO_API_URL}/api/system/maintenance/`,
+  },
+
+  // Contact endpoints
+  contact: {
+    messages: `${DJANGO_API_URL}/api/contact/messages/`,
+    messageDetail: (id: string | number) => `${DJANGO_API_URL}/api/contact/messages/${id}/`,
+    messageReply: (id: string | number) => `${DJANGO_API_URL}/api/contact/messages/${id}/reply/`,
+    replyDetail: (id: string | number) => `${DJANGO_API_URL}/api/contact/replies/${id}/`,
   },
 };
 
@@ -162,10 +174,15 @@ export const clearTokens = () => {
  */
 export async function djangoApiRequest<T = any>(
   endpoint: string,
-  options: RequestInit & { skipAuth?: boolean; suppressLog?: boolean; responseType?: 'json' | 'blob' } = {},
+  options: RequestInit & { skipAuth?: boolean; suppressLog?: boolean; responseType?: 'json' | 'blob'; timeout?: number; skipProxy?: boolean; _retryCount?: number } = {},
 ): Promise<T> {
+  // console.debug(`[djangoApiRequest] Calling: ${endpoint}`, options);
   const tokens = getTokens();
   const headers = new Headers(options.headers || {});
+  const timeoutMs = options.timeout || 30000; // 30s default timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const retryCount = options._retryCount || 0;
 
   // Add JWT token to Authorization header
   if (!options.skipAuth && tokens?.access) {
@@ -173,8 +190,6 @@ export async function djangoApiRequest<T = any>(
   }
 
   if (!(options.body instanceof FormData)) {
-    // Only set a default Content-Type when the caller hasn't specified one.
-    // This allows callers to submit alternative encodings (e.g., x-www-form-urlencoded).
     if (!headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
     }
@@ -188,27 +203,45 @@ export async function djangoApiRequest<T = any>(
     if (
       typeof window !== "undefined" &&
       NEXT_PUBLIC_USE_PROXY &&
+      !options.skipProxy &&
       endpoint.startsWith(DJANGO_API_URL)
     ) {
       try {
         const url = new URL(endpoint)
-        const path = url.pathname || ""
+        let path = url.pathname || ""
+        
+        // Ensure trailing slash for Django consistency if it's an API list/detail endpoint
+        // This helps prevent 301/308 redirect loops in some Django setups
+        if (path.startsWith("/api/") && !path.endsWith("/") && !path.split("/").pop()?.includes(".")) {
+            path += "/";
+        }
+
         // Only rewrite API requests to same-origin proxy; leave media and other absolute URLs alone
         if (path.startsWith("/api/")) {
-          endpoint = endpoint.replace(DJANGO_API_URL, "")
-          // eslint-disable-next-line no-console
-          console.debug("[clms] djangoApiRequest rewrote endpoint to use proxy:", endpoint)
+          endpoint = path + url.search;
+          if (!options.suppressLog) {
+            console.log(`[djangoApiRequest] Proxied to ${endpoint}`);
+          }
         }
       } catch (e) {
         /* ignore */
       }
     }
 
+    if (!options.suppressLog) {
+      console.log(`[djangoApiRequest] Starting ${options.method || 'GET'} to ${endpoint} (retry: ${retryCount})`);
+    }
+
     let response = await fetch(endpoint, {
       ...options,
       cache: "no-store",
       headers,
+      signal: controller.signal,
     });
+
+    if (!options.suppressLog) {
+      console.log(`[djangoApiRequest] Status ${response.status} from ${endpoint}`);
+    }
 
     // Handle redirects (some dev servers may respond with 308/301 to normalize paths)
     if (response.status >= 300 && response.status < 400) {
@@ -233,15 +266,14 @@ export async function djangoApiRequest<T = any>(
         } catch (e) {
           /* ignore */
         }
-        const followResp = await fetch(target, { ...options, headers });
+        const followResp = await fetch(target, { ...options, headers, signal: controller.signal });
         if (!followResp.ok) {
           // let error handling below process it
           response = followResp;
         } else {
-          if (options.responseType === 'blob') {
-            return followResp.blob() as Promise<T>;
-          }
-          return followResp.json() as Promise<T>;
+          const result = options.responseType === 'blob' ? await followResp.blob() : await followResp.json();
+          clearTimeout(timeoutId);
+          return result as T;
         }
       }
     }
@@ -251,23 +283,28 @@ export async function djangoApiRequest<T = any>(
       const refreshed = await refreshAccessToken(tokens.refresh);
       if (refreshed) {
         // Retry original request with new token
-        return djangoApiRequest<T>(endpoint, { ...options, skipAuth: false });
+        const result = await djangoApiRequest<T>(endpoint, { ...options, skipAuth: false, _retryCount: retryCount });
+        clearTimeout(timeoutId);
+        return result;
       }
     }
 
     if (options.responseType === 'blob') {
       if (response.ok) {
-        return response.blob() as Promise<T>;
+        const result = await response.blob();
+        clearTimeout(timeoutId);
+        return result as T;
       }
-      // If not ok, fall through to error handling which expects JSON or text
     }
 
-      if (!response.ok) {
+    if (!response.ok) {
       const errorData = await response.json().catch(async () => {
-        // fallback to text if json parsing fails
         const txt = await response.text().catch(() => "");
         return { detail: txt };
       });
+      
+      clearTimeout(timeoutId);
+      // ... rest of error handling ...
 
       // Normalize message: backends may return {detail: ""} which is not useful
       let message = "";
@@ -369,25 +406,73 @@ export async function djangoApiRequest<T = any>(
       throw error;
     }
 
-    return response.json() as Promise<T>;
-  } catch (error) {
+    const result = await response.json();
+    clearTimeout(timeoutId);
+    return result as T;
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    
+    // Handle timeout specifically
+    if (error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+      const msg = `Request timed out after ${timeoutMs}ms. Is the server slow? Endpoint: ${endpoint}`;
+      const e: any = new Error(msg);
+      e.status = 408;
+      e.error = { detail: msg };
+      e.endpoint = endpoint;
+      throw e;
+    }
+
     // Network-level failures (e.g. DNS, connection refused) often surface as TypeError: "Failed to fetch".
     try {
       const asString = String(error || "");
-      if (error instanceof TypeError || /failed to fetch/i.test(asString)) {
-        const msg = `Network error: could not reach backend at ${DJANGO_API_URL}. Is the Django server running and reachable?`;
+      if (error instanceof TypeError || /failed to fetch/i.test(asString) || (error as any)?.status === 408) {
+        // Fallback Logic:
+        // 1. If absolute URL failed, try the other local representation (127.0.0.1 vs localhost)
+        // 2. If relative proxy path failed, try the absolute backend URL directly (bypass proxy)
+        
+        if (typeof window !== "undefined" && retryCount < 2) {
+          let retryUrl: string | null = null;
+
+          if (endpoint.includes("127.0.0.1:8000")) {
+            retryUrl = endpoint.replace("127.0.0.1:8000", "localhost:8000");
+          } else if (endpoint.includes("localhost:8000")) {
+            retryUrl = endpoint.replace("localhost:8000", "127.0.0.1:8000");
+          } else if (endpoint.startsWith("/api/")) {
+            // If proxy failed, try calling the backend directly as a last resort
+            retryUrl = `${DJANGO_API_URL}${endpoint}`;
+            // eslint-disable-next-line no-console
+            console.debug("[clms] Proxy failed, attempting direct backend call:", retryUrl);
+          }
+
+          if (retryUrl && retryUrl !== endpoint) {
+            // eslint-disable-next-line no-console
+            console.debug("[clms] Retrying with fallback URL:", retryUrl);
+            return djangoApiRequest<T>(retryUrl, { 
+              ...options, 
+              skipAuth: options.skipAuth, 
+              skipProxy: true, 
+              _retryCount: retryCount + 1 
+            });
+          }
+        }
+
+        if (!options.suppressLog) {
+          // eslint-disable-next-line no-console
+          console.debug("[clms] Django API network error:", asString, "Endpoint:", endpoint);
+        }
+
+        const msg = `Network error: could not reach backend. Endpoint: ${endpoint}. Is the server running and reachable?`;
         const e: any = new Error(msg);
         e.status = 0;
         e.error = { detail: msg };
         try {
           e.endpoint = endpoint;
         } catch (e2) {}
-        if (!options.suppressLog)
-          console.error("[clms] Django API network error:", e?.message || (e && JSON.stringify(e)) || e);
         throw e;
       }
     } catch (ne) {
-      // ignore and continue to normalization
+      if (ne instanceof Error && (ne as any).status === 0) throw ne;
+      // ignore other normalization errors
     }
 
     // Normalize any other thrown error so callers always receive an object with a non-empty `error.detail`.
@@ -407,13 +492,13 @@ export async function djangoApiRequest<T = any>(
           e.endpoint = endpoint;
         } catch (e2) {}
         if (!options.suppressLog)
-          console.error("[clms] Django API normalized error:", e?.message || (e && JSON.stringify(e)) || e);
+          console.debug("[clms] Django API normalized error:", e?.message || (e && JSON.stringify(e)) || e);
         throw e;
       }
     } catch (e) {
       // if normalization failed, fall back to throwing the original error
       if (!options.suppressLog)
-        console.error("[clms] Django API error (normalization failed):", error);
+        console.debug("[clms] Django API error (normalization failed):", error);
       throw error;
     }
 
@@ -425,7 +510,25 @@ export async function djangoApiRequest<T = any>(
         // Authentication failures are expected during login attempts — log as debug only
         console.debug("[clms] Django API auth failure:", (error as any)?.error?.detail || (error as any)?.message || "401");
       } else {
-        console.error("[clms] Django API error:", (error as any)?.message || (error && JSON.stringify(error)) || error);
+        try {
+          const status = (error as any)?.status || 0
+          const body = (error as any)?.error || {}
+          const msg = String((error as any)?.message || "")
+          const isMaintenance =
+            status === 503 &&
+            (
+              String((body as any)?.error || "").toLowerCase() === "maintenance_mode" ||
+              /maintenance/i.test(String((body as any)?.message || "")) ||
+              /maintenance/i.test(msg)
+            )
+          if (isMaintenance) {
+            console.debug("[clms] Maintenance mode (503):", (body as any)?.message || msg || "Maintenance active")
+          } else {
+            console.warn("[clms] Django API error:", (error as any)?.message || (error && JSON.stringify(error)) || error);
+          }
+        } catch {
+          console.warn("[clms] Django API error:", (error as any)?.message || (error && JSON.stringify(error)) || error);
+        }
       }
     }
     throw error;
@@ -439,20 +542,29 @@ export async function refreshAccessToken(
   refreshToken: string,
 ): Promise<boolean> {
   try {
+    console.log("[clms] Attempting to refresh access token...");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout for refresh
+
     const response = await fetch(DJANGO_ENDPOINTS.auth.refresh, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ refresh: refreshToken }),
+      signal: controller.signal,
     });
 
+    clearTimeout(timeoutId);
+
     if (!response.ok) {
+      console.warn("[clms] Token refresh failed with status:", response.status);
       clearTokens();
       return false;
     }
 
     const data = await response.json();
+    console.log("[clms] Token refresh successful.");
     setTokens({ access: data.access, refresh: refreshToken });
     return true;
   } catch (error) {

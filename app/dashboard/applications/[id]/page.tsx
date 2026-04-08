@@ -6,13 +6,10 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Building2, ArrowLeft, Download, Loader2, Calendar, User, FileText, CheckCircle2, XCircle, Clock, AlertCircle } from "lucide-react"
+import { Building2, ArrowLeft, Download, Loader2, User, FileText, CheckCircle2, XCircle, Clock, AlertCircle } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
-import { applicationsApi, licensesApi, documentsApi } from "@/lib/api/django-client"
-import { generateLicensePDF } from "@/lib/downloads/pdf-generator"
-import { downloadPDF } from "@/lib/downloads/file-download"
-import { generateQRDataURL, createVerificationUrl } from "@/lib/qr/qr-utils"
+import { applicationsApi, documentsApi } from "@/lib/api/django-client"
 import { getAppLicenseMapping, removeAppLicenseMapping } from '@/lib/storage/licenses-cache'
 
 export default function ApplicationDetail() {
@@ -22,7 +19,6 @@ export default function ApplicationDetail() {
   const { toast } = useToast()
   const [application, setApplication] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [isDownloading, setIsDownloading] = useState(false)
   const [documents, setDocuments] = useState<any[]>([])
   const [isUploading, setIsUploading] = useState(false)
 
@@ -86,8 +82,13 @@ export default function ApplicationDetail() {
       case "rejected":
         return <Badge variant="destructive"><XCircle className="w-3 h-3 mr-1" /> Rejected</Badge>
       case "pending":
-      default:
         return <Badge variant="secondary"><Clock className="w-3 h-3 mr-1" /> Pending</Badge>
+      case "info_requested":
+        return <Badge className="bg-amber-500 text-white"><AlertCircle className="w-3 h-3 mr-1" /> Info Requested</Badge>
+      case "resubmitted":
+        return <Badge className="bg-blue-500 text-white"><Clock className="w-3 h-3 mr-1" /> Resubmitted</Badge>
+      default:
+        return <Badge variant="secondary">{status}</Badge>
     }
   }
 
@@ -100,131 +101,6 @@ export default function ApplicationDetail() {
       vehicle: "Vehicle Registration",
     }
     return types[type] || type
-  }
-
-  const handleDownloadLicense = async () => {
-    if (!application || application.status !== "approved") {
-      toast({
-        title: "Not Available",
-        description: "License downloads are only available for approved applications.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsDownloading(true)
-    try {
-      const app = application
-      const data = app.data || {}
-      const holderName = data.applicantName || data.fullName || app.applicant || "-"
-      const companyName = data.companyName || data.company_name || "N/A"
-      const appYear = new Date(app.submittedAt || app.created_at || Date.now()).getFullYear()
-      const fallbackLicenseNumber = `LIC-${appYear}-${String(app.id).padStart(6, '0')}`
-      const licenseNumber = data.registrationNumber || data.licenseNumber || fallbackLicenseNumber
-      
-      const issueDate = data.issueDate || app.submittedAt || app.created_at || new Date().toISOString()
-      const expiryDate = data.expiryDate || new Date(new Date(issueDate).setFullYear(new Date(issueDate).getFullYear() + 1)).toISOString()
-
-      // Build verification URL and QR code
-      const verificationUrl = createVerificationUrl(undefined, app.id ? String(app.id) : licenseNumber, licenseNumber)
-      
-      const qrContent = {
-        id: fallbackLicenseNumber,
-        type: getTypeLabel(app.license_type || app.type),
-        category: "License",
-        holderName,
-        companyName,
-        registrationNumber: licenseNumber,
-        issueDate: new Date(issueDate).toISOString(),
-        expiryDate: new Date(expiryDate).toISOString(),
-        status: "Active",
-        verificationUrl
-      }
-
-      const qrDataUrl = await generateQRDataURL(JSON.stringify(qrContent))
-
-      const licensePayload = {
-        ...qrContent,
-    grade: (() => {
-      try {
-        const g =
-          data.grade ??
-          data.licenseType ??
-          data.category ??
-          "";
-        return g || "";
-      } catch {
-        return "";
-      }
-    })(),
-        qrDataUrl,
-      }
-
-      // Try server-side download if we have a mapped backend license id
-      const mappedBackendId = getAppLicenseMapping(app.id)
-      
-      if (mappedBackendId && app.status === 'approved') {
-        try {
-          const resp = await licensesApi.download(String(mappedBackendId))
-          const licenseData = resp.license ?? resp
-          
-          // Ensure we use the correct registration number for the QR code
-          const finalRegNum = licenseData.data?.registrationNumber ?? licensePayload.registrationNumber
-          // Force regeneration of verification URL and QR code to ensure consistency
-          const finalVerificationUrl = createVerificationUrl(undefined, licenseData.id ? String(licenseData.id) : finalRegNum, finalRegNum)
-          
-          const finalQrContent = {
-            id: licenseData.id ?? licensePayload.id,
-            registrationNumber: finalRegNum,
-            type: licenseData.license_type ?? licensePayload.type,
-            category: 'License',
-            holderName: licenseData.data?.holderName ?? licensePayload.holderName,
-            companyName: licenseData.data?.companyName ?? licensePayload.companyName,
-            issueDate: licenseData.issued_date ?? licenseData.data?.issueDate ?? licensePayload.issueDate,
-            expiryDate: licenseData.expiry_date ?? licenseData.data?.expiryDate ?? licensePayload.expiryDate,
-            status: licenseData.status ?? licensePayload.status,
-            verificationUrl: finalVerificationUrl
-          }
-          
-          const finalQrDataUrl = await generateQRDataURL(JSON.stringify(finalQrContent))
-
-          const payloadFromServer = {
-            ...finalQrContent,
-            grade:
-              licenseData?.data?.grade ??
-              licenseData?.data?.licenseType ??
-              licenseData?.data?.category ??
-              "",
-            qrDataUrl: finalQrDataUrl,
-          }
-
-          const pdf = await generateLicensePDF(payloadFromServer)
-          downloadPDF(pdf, `License-${payloadFromServer.registrationNumber}.pdf`)
-          toast({ title: "Downloaded", description: "License certificate downloaded." })
-          setIsDownloading(false)
-          return
-        } catch (err: any) {
-          console.warn('[clms] Server download failed, using client-side PDF generation', err?.status || err?.message || err)
-          
-          if (err?.status === 403 || err?.status === 404 || (err?.message && String(err.message).includes('Not permitted'))) {
-            removeAppLicenseMapping(app.id)
-          }
-        }
-      }
-
-      const pdf = await generateLicensePDF(licensePayload)
-      downloadPDF(pdf, `License-${licensePayload.registrationNumber}.pdf`)
-      toast({ title: "Downloaded", description: "License certificate downloaded." })
-    } catch (error) {
-      console.error("Error downloading:", error)
-      toast({
-        title: "Error",
-        description: "Failed to download application.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsDownloading(false)
-    }
   }
 
   if (isLoading) {
@@ -272,16 +148,6 @@ export default function ApplicationDetail() {
           <h1 className="text-3xl font-bold tracking-tight">Application Details</h1>
         </div>
         <div className="flex gap-2">
-          {application.status === 'approved' && (
-            <Button onClick={handleDownloadLicense} disabled={isDownloading}>
-              {isDownloading ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <Download className="w-4 h-4 mr-2" />
-              )}
-              Download License
-            </Button>
-          )}
         </div>
       </div>
 

@@ -21,6 +21,9 @@ import {
   Eye,
   Download,
   Loader2,
+  Bell,
+  Trash2,
+  AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/hooks/use-toast";
@@ -29,7 +32,7 @@ import {
   generateLicensePDF,
 } from "@/lib/downloads/pdf-generator";
 import { downloadPDF } from "@/lib/downloads/file-download";
-import { applicationsApi, licensesApi } from "@/lib/api/django-client";
+import { applicationsApi, licensesApi, notificationsApi } from "@/lib/api/django-client";
 import {
   addOrUpdateCachedLicense,
   setAppLicenseMapping,
@@ -48,6 +51,7 @@ import { DJANGO_API_URL } from "@/lib/config/django-api";
 import {
   Dialog,
   DialogContent,
+  DialogHeader,
   DialogTrigger,
   DialogTitle,
   DialogDescription,
@@ -55,10 +59,23 @@ import {
 } from "@/components/ui/dialog";
 
 export default function ApplicationsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex justify-center items-center h-screen">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    }>
+      <ApplicationsContent />
+    </Suspense>
+  )
+}
+
+function ApplicationsContent() {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
   const [applications, setApplications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [appsLoading, setAppsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -158,10 +175,42 @@ function ArrivalBanner() {
     };
 
     fetchLicenses();
+
+    // fetch notifications for current user
+    const fetchNotifications = async () => {
+      try {
+        const n = await notificationsApi.list();
+        setNotifications(Array.isArray(n) ? n : []);
+      } catch (e) {
+        console.warn("[clms] Failed to fetch notifications", e);
+      }
+    };
+
+    fetchNotifications();
   }, [toast, isLoading, isAuthenticated, router]);
 
+  const markNotificationAsRead = async (id: number) => {
+    try {
+      await notificationsApi.markRead(id);
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
+      );
+    } catch (err) {
+      console.error("Failed to mark notification as read", err);
+    }
+  };
+
+  const markAllNotificationsAsRead = async () => {
+    try {
+      await notificationsApi.markAllRead();
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    } catch (err) {
+      console.error("Failed to mark all notifications as read", err);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case "pending":
         return (
           <Badge
@@ -192,6 +241,26 @@ function ArrivalBanner() {
             Rejected
           </Badge>
         );
+      case "info_requested":
+        return (
+          <Badge
+            variant="secondary"
+            className="bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          >
+            <AlertCircle className="w-3 h-3 mr-1" />
+            Info Requested
+          </Badge>
+        );
+      case "resubmitted":
+        return (
+          <Badge
+            variant="secondary"
+            className="bg-blue-500/10 text-blue-700 dark:text-blue-400"
+          >
+            <Clock className="w-3 h-3 mr-1" />
+            Resubmitted
+          </Badge>
+        );
       default:
         return <Badge variant="secondary">{status}</Badge>;
     }
@@ -219,249 +288,6 @@ function ArrivalBanner() {
     }
   };
 
-  const handleDownloadLicense = async (app: any) => {
-    if (app.status !== "approved") {
-      toast({
-        title: "Not Available",
-        description:
-          "License downloads are only available for approved applications.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setDownloadingId(app.id);
-    try {
-      const data = app.data || {};
-      const holderName =
-        data.applicantName || data.fullName || app.applicant || "-";
-      const companyName = data.companyName || data.company_name || "N/A";
-
-      // Try to locate an existing License object for richer metadata
-      const matched = licenses.find((lic: any) => {
-        try {
-          // match by owner id/email, license type or subtype if available
-          if (
-            lic.owner &&
-            app.applicant &&
-            String(lic.owner) === String(app.applicant)
-          )
-            return true;
-          if (
-            lic.license_type &&
-            app.license_type &&
-            lic.license_type === app.license_type
-          )
-            return true;
-          const appYear = new Date(
-            app.submittedAt || app.created_at || Date.now(),
-          ).getFullYear();
-          const fallbackNum = `LIC-${appYear}-${String(app.id).padStart(6, "0")}`;
-          if (
-            lic.data &&
-            lic.data.registrationNumber &&
-            (lic.data.registrationNumber === `LIC-${app.id}` ||
-              lic.data.registrationNumber === fallbackNum)
-          )
-            return true;
-        } catch (e) {
-          return false;
-        }
-        return false;
-      });
-
-      const appYear = new Date(
-        app.submittedAt || app.created_at || Date.now(),
-      ).getFullYear();
-      const fallbackLicenseNumber = `LIC-${appYear}-${String(app.id).padStart(6, "0")}`;
-      // Prefer the license number saved on the application record itself, then the matched license, then fallback
-      const savedLicenseNumber =
-        app.data?.licenseNumber || app.data?.license_number;
-      const licenseNumber =
-        savedLicenseNumber ??
-        matched?.data?.licenseNumber ??
-        fallbackLicenseNumber;
-      const issueDate =
-        matched?.data?.issueDate ??
-        (app.submittedAt || app.created_at || new Date().toISOString());
-      const expiryDate =
-        matched?.data?.expiryDate ??
-        new Date(
-          new Date(issueDate).setFullYear(
-            new Date(issueDate).getFullYear() + 1,
-          ),
-        ).toISOString();
-
-      // Build verification URL and QR code (include human-readable license number in URL)
-      const verificationUrl = createVerificationUrl(
-        undefined,
-        matched?.id ? String(matched.id) : licenseNumber,
-        licenseNumber,
-      );
-
-      const qrContent = {
-        id: matched?.id ?? fallbackLicenseNumber,
-        type: getTypeLabel(app.license_type || app.type),
-        category: "License",
-        holderName,
-        companyName,
-        registrationNumber: licenseNumber,
-        issueDate: new Date(issueDate).toISOString(),
-        expiryDate: new Date(expiryDate).toISOString(),
-        status: matched?.status ?? "Active",
-        verificationUrl,
-      };
-
-      const qrDataUrl = await generateQRDataURL(JSON.stringify(qrContent));
-
-      const licensePayload = {
-        ...qrContent,
-        grade: (() => {
-          try {
-            const g =
-              data.grade ??
-              data.licenseType ??
-              data.category ??
-              matched?.data?.grade ??
-              matched?.data?.licenseType ??
-              matched?.data?.category;
-            return g || "";
-          } catch {
-            return "";
-          }
-        })(),
-        qrDataUrl,
-        photoUrl: (() => {
-          const raw =
-            matched?.license_photo_base64 ||
-            matched?.license_photo_url ||
-            matched?.license_photo;
-          if (!raw) return undefined;
-          return typeof raw === "string" && raw.startsWith("http")
-            ? raw
-            : `${DJANGO_API_URL}${raw}`;
-        })(),
-      };
-
-      // Try server-side download if we have a mapped backend license id
-      // But always fall back to client-side generation if it fails (for approved apps)
-      const mappedBackendId = getAppLicenseMapping(app.id) || matched?.id;
-
-      if (mappedBackendId && app.status === "approved") {
-        try {
-          const resp = await licensesApi.download(String(mappedBackendId));
-          // On success server returns serialized license object; build PDF client-side
-          const licenseData = resp.license ?? resp;
-
-          // Ensure we use the correct registration number for the QR code
-          const finalRegNum =
-            licenseData.data?.registrationNumber ??
-            licensePayload.registrationNumber;
-          // Force regeneration of verification URL and QR code to ensure consistency
-          const finalVerificationUrl = createVerificationUrl(
-            undefined,
-            licenseData.id ? String(licenseData.id) : finalRegNum,
-            finalRegNum,
-          );
-
-          const finalQrContent = {
-            id: licenseData.id ?? licensePayload.id,
-            registrationNumber: finalRegNum,
-            type: licenseData.license_type ?? licensePayload.type,
-            category: "License",
-            holderName:
-              licenseData.data?.holderName ?? licensePayload.holderName,
-            companyName:
-              licenseData.data?.companyName ?? licensePayload.companyName,
-            issueDate:
-              licenseData.issued_date ??
-              licenseData.data?.issueDate ??
-              licensePayload.issueDate,
-            expiryDate:
-              licenseData.expiry_date ??
-              licenseData.data?.expiryDate ??
-              licensePayload.expiryDate,
-            status: licenseData.status ?? licensePayload.status,
-            verificationUrl: finalVerificationUrl,
-          };
-
-          const finalQrDataUrl = await generateQRDataURL(
-            JSON.stringify(finalQrContent),
-          );
-
-          const payloadFromServer = {
-            ...finalQrContent,
-            grade:
-              licenseData?.data?.grade ??
-              licenseData?.data?.licenseType ??
-              licenseData?.data?.category ??
-              "",
-            qrDataUrl: finalQrDataUrl,
-            photoUrl: (() => {
-              const raw =
-                licenseData.license_photo_base64 ||
-                licenseData.license_photo_url ||
-                licenseData.license_photo;
-              if (!raw) return undefined;
-              return typeof raw === "string" && raw.startsWith("http")
-                ? raw
-                : `${DJANGO_API_URL}${raw}`;
-            })(),
-          };
-
-          const pdf = await generateLicensePDF(payloadFromServer);
-          downloadPDF(
-            pdf,
-            `License-${payloadFromServer.registrationNumber}.pdf`,
-          );
-          toast({
-            title: "Downloaded",
-            description: "License certificate downloaded.",
-          });
-          return;
-        } catch (err: any) {
-          // For approved apps, always fall back to client-side generation on any error
-          // This ensures downloads always work regardless of backend permission issues
-          if (
-            err?.status === 403 ||
-            err?.status === 404 ||
-            (err?.message && String(err.message).includes("Not permitted"))
-          ) {
-            // Quietly handle expected permission/not-found errors by removing the mapping
-            console.debug(
-              "[clms] Server download not available, falling back to client generation",
-              err?.message,
-            );
-            removeAppLicenseMapping(app.id);
-          } else {
-            // eslint-disable-next-line no-console
-            console.warn(
-              "[clms] Server download failed, using client-side PDF generation",
-              err?.status || err?.message || err,
-            );
-          }
-          // Continue to client-side PDF generation below
-        }
-      }
-
-      const pdf = await generateLicensePDF(licensePayload);
-      downloadPDF(pdf, `License-${licensePayload.registrationNumber}.pdf`);
-      toast({
-        title: "Downloaded",
-        description: "License certificate downloaded.",
-      });
-    } catch (error) {
-      console.error("Error downloading:", error);
-      toast({
-        title: "Error",
-        description: "Failed to download application.",
-        variant: "destructive",
-      });
-    } finally {
-      setDownloadingId(null);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card sticky top-0 z-50">
@@ -480,7 +306,7 @@ function ArrivalBanner() {
             </div>
           </div>
           <Button
-            variant="outline"
+            variant="outlineBlueHover"
             asChild
             className="h-8 px-3 text-xs w-full sm:w-auto"
           >
@@ -496,6 +322,70 @@ function ArrivalBanner() {
         <Suspense fallback={null}>
           <ArrivalBanner />
         </Suspense>
+
+        {notifications.length > 0 && (
+          <div className="mb-8 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Bell className="w-5 h-5 text-primary" />
+                <h2 className="text-lg font-semibold">Notifications</h2>
+              </div>
+              {notifications.some((n) => !n.is_read) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-muted-foreground hover:text-primary"
+                  onClick={markAllNotificationsAsRead}
+                >
+                  Mark all as read
+                </Button>
+              )}
+            </div>
+            <div className="grid gap-3 max-h-100 overflow-y-auto pr-2 custom-scrollbar">
+              {notifications.map((n: any) => (
+                <Card
+                  key={n.id}
+                  className={`border-l-4 ${
+                    n.is_read ? "border-l-muted opacity-80" : "border-l-primary bg-primary/5"
+                  } transition-all shadow-sm`}
+                >
+                  <CardContent className="p-2.5">
+                    <div className="flex justify-between items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <h4 className={`font-semibold text-xs truncate ${n.is_read ? "text-muted-foreground" : "text-foreground"}`}>
+                            {n.title}
+                          </h4>
+                          {!n.is_read && (
+                            <Badge className="h-1 w-1 rounded-full p-0 bg-primary" />
+                          )}
+                        </div>
+                        <p className="text-[11px] leading-snug text-muted-foreground line-clamp-1">
+                          {n.message}
+                        </p>
+                        <span className="text-[9px] text-muted-foreground/50 mt-0.5 block">
+                          {new Date(n.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      {!n.is_read && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-primary shrink-0"
+                          onClick={() => markNotificationAsRead(n.id)}
+                          title="Mark as read"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+
         {appsLoading ? (
           <Card>
             <CardContent className="p-12 text-center">
@@ -507,7 +397,7 @@ function ArrivalBanner() {
           <Card>
             <CardContent className="p-12 text-center">
               <p className="text-red-600 font-semibold mb-4">{error}</p>
-              <Button asChild>
+              <Button variant="outlineBlueHover" asChild>
                 <Link href="/dashboard">Back to Dashboard</Link>
               </Button>
             </CardContent>
@@ -728,6 +618,38 @@ function ArrivalBanner() {
                           );
                         })()}
 
+                      {/* Feedback banner for info_requested or rejected status */}
+                      {(app.status === "info_requested" || app.status === "rejected") &&
+                        (() => {
+                          const logs = Array.isArray(app.logs) ? app.logs : [];
+                          const latestFeedback = logs.find((log: any) =>
+                            ["info_requested", "rejected"].includes(log.action)
+                          );
+                          if (!latestFeedback) return null;
+
+                          return (
+                            <div
+                              className={`mb-4 p-3 rounded-md border text-sm flex items-start gap-3 ${
+                                app.status === "rejected"
+                                  ? "bg-red-50 border-red-100 text-red-800"
+                                  : "bg-amber-50 border-amber-100 text-amber-800"
+                              }`}
+                            >
+                              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                              <div className="flex-1">
+                                <p className="font-semibold mb-0.5">
+                                  {app.status === "rejected"
+                                    ? "Application Rejected"
+                                    : "Information Requested"}
+                                </p>
+                                <p className="text-xs opacity-90 line-clamp-2">
+                                  {latestFeedback.details}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
                       {/* Inline approval required banner (if server indicated approval needed) */}
                       {approvalRequired[String(app.id)] && (
                         <div className="mb-4 p-3 rounded bg-red-50 border border-red-200 text-red-700">
@@ -762,11 +684,13 @@ function ArrivalBanner() {
                               </Button>
                             </DialogTrigger>
                             <DialogContent>
-                              <DialogTitle>Application Details</DialogTitle>
-                              <DialogDescription className="mb-4">
-                                Review the original application information
-                                submitted by the user.
-                              </DialogDescription>
+                              <DialogHeader>
+                                <DialogTitle>Application Details</DialogTitle>
+                                <DialogDescription>
+                                  Review the original application information
+                                  submitted by the user.
+                                </DialogDescription>
+                              </DialogHeader>
                               {selectedApp ? (
                                 <div className="space-y-4">
                                   <div>
@@ -971,9 +895,7 @@ function ArrivalBanner() {
                                       let licenseNumber = fallbackLicenseNumber;
                                       if (mappedBackendId) {
                                         try {
-                                          const licenseObj = await (
-                                            await import("@/lib/api/django-client")
-                                          ).licensesApi.getLicense(
+                                          const licenseObj = await licensesApi.getLicense(
                                             String(mappedBackendId),
                                           );
                                           licenseNumber =
@@ -1110,10 +1032,12 @@ function ArrivalBanner() {
                                 </Button>
                               </DialogTrigger>
                               <DialogContent>
-                                <DialogTitle>QR Code</DialogTitle>
-                                <DialogDescription className="mb-4">
-                                  Scan to verify the license.
-                                </DialogDescription>
+                                <DialogHeader>
+                                  <DialogTitle>QR Code</DialogTitle>
+                                  <DialogDescription>
+                                    Scan to verify the license.
+                                  </DialogDescription>
+                                </DialogHeader>
                                 {qrDataUrl ? (
                                   <div className="flex flex-col items-center gap-4">
                                     <img

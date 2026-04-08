@@ -38,10 +38,11 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 export default function DashboardPage() {
   const router = useRouter()
-  const { user, isLoading, updateUser } = useAuth()
+  const { user, isLoading, updateUser, maintenanceMode } = useAuth()
   const [recentApplications, setRecentApplications] = useState<any[]>([])
   const [isLoadingApps, setIsLoadingApps] = useState(true)
   const [stats, setStats] = useState<any>({
@@ -122,8 +123,17 @@ export default function DashboardPage() {
             rejectedApplications: rejected,
             expiringLicenses: 0, // Placeholder
           })
-        } catch (err) {
-          console.error("[clms] Failed to fetch dashboard data:", err)
+        } catch (err: any) {
+          const msg = String(err?.message || "")
+          const isMaintenance =
+            err?.status === 503 ||
+            /maintenance/i.test(msg) ||
+            /maintenance/i.test(String(err?.error?.message || ""))
+          if (isMaintenance) {
+            // keep defaults; skip noisy error logs during maintenance
+          } else {
+            console.error("[clms] Failed to fetch dashboard data:", err)
+          }
         } finally {
           setIsLoadingApps(false)
         }
@@ -146,14 +156,17 @@ export default function DashboardPage() {
   }
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case "approved":
       case "active":
         return <Badge className="bg-green-500 hover:bg-green-600">Active</Badge>
       case "pending":
+      case "resubmitted":
         return <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20">Pending</Badge>
       case "rejected":
         return <Badge variant="destructive">Rejected</Badge>
+      case "info_requested":
+        return <Badge className="bg-amber-500 text-white hover:bg-amber-600">Info Requested</Badge>
       default:
         return <Badge variant="outline">{status}</Badge>
     }
@@ -176,7 +189,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" asChild className="hidden md:flex">
+            <Button variant="outlineBlueHover" size="sm" asChild className="hidden md:flex">
               <Link href="/">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Back to Home
@@ -226,6 +239,12 @@ export default function DashboardPage() {
       </header>
 
       <div className="container mx-auto px-4 py-8">
+        {maintenanceMode && (
+          <Alert className="border-amber-300 bg-amber-50 text-amber-800 mb-4">
+            <AlertTitle>Maintenance in Progress</AlertTitle>
+            <AlertDescription>Some dashboard data may be temporarily unavailable.</AlertDescription>
+          </Alert>
+        )}
         {/* Quick Stats */}
         <div className="grid md:grid-cols-4 gap-4 mb-8">
           {[

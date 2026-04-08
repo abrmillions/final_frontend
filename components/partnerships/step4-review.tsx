@@ -3,6 +3,8 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { CheckCircle2 } from "lucide-react"
+import { useAuth } from "@/lib/auth/auth-context"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 interface Step4Props {
   data: any
@@ -11,10 +13,20 @@ interface Step4Props {
 }
 
 export function PartnershipStep4({ data, onBack, onSubmit }: Step4Props) {
+  const { maintenanceMode, user } = useAuth()
+  const isAdmin = (user?.role || "").toLowerCase() === "admin"
+  const disabled = maintenanceMode && !isAdmin
   return (
     <div className="space-y-6">
+      {disabled && (
+        <Alert className="border-amber-300 bg-amber-50 text-amber-800">
+          <CheckCircle2 className="w-5 h-5 text-amber-700" />
+          <AlertTitle>Maintenance in Progress</AlertTitle>
+          <AlertDescription>Submissions are temporarily disabled.</AlertDescription>
+        </Alert>
+      )}
       <div className="bg-accent/10 border border-accent/20 rounded-lg p-4 flex items-start gap-3">
-        <CheckCircle2 className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
+        <CheckCircle2 className="w-5 h-5 text-accent shrink-0 mt-0.5" />
         <div>
           <p className="text-sm font-medium text-foreground">Review partnership registration</p>
           <p className="text-xs text-muted-foreground mt-1">
@@ -119,7 +131,7 @@ export function PartnershipStep4({ data, onBack, onSubmit }: Step4Props) {
         <Button type="button" variant="outline" onClick={onBack}>
           Back
         </Button>
-        <Button onClick={onSubmit} size="lg">
+        <Button onClick={onSubmit} size="lg" disabled={disabled}>
           Register Partnership
         </Button>
       </div>

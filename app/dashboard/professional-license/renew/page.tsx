@@ -14,6 +14,8 @@
  import { Label } from "@/components/ui/label";
  import { applicationsApi, documentsApi } from "@/lib/api/django-client";
  import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth/auth-context";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
  
  type RenewalForm = {
    previousLicenseNumber: string;
@@ -28,6 +30,9 @@
  export default function ProfessionalRenewPage() {
    const router = useRouter();
    const { toast } = useToast();
+  const { maintenanceMode, user } = useAuth();
+  const isAdmin = (user?.role || "").toLowerCase() === "admin";
+  const disabled = maintenanceMode && !isAdmin;
  
    const [form, setForm] = useState<RenewalForm>({
      previousLicenseNumber: "",
@@ -55,6 +60,10 @@
  
    const handleSubmit = async (e: React.FormEvent) => {
      e.preventDefault();
+    if (disabled) {
+      toast({ title: "Maintenance in Progress", description: "Submissions are temporarily disabled.", variant: "destructive" });
+      return;
+    }
      setError(null);
      if (!form.previousLicenseNumber || !form.renewalPeriod) {
        setError("Previous license number and renewal period are required.");
@@ -124,6 +133,12 @@
              </CardDescription>
            </CardHeader>
            <CardContent>
+            {disabled && (
+              <Alert className="border-amber-300 bg-amber-50 text-amber-800 mb-4">
+                <AlertTitle>Maintenance in Progress</AlertTitle>
+                <AlertDescription>Submissions are temporarily disabled.</AlertDescription>
+              </Alert>
+            )}
              {error && (
                <div className="mb-4 text-sm text-destructive whitespace-pre-wrap">
                  {error}
@@ -192,7 +207,7 @@
                </div>
  
                <div className="pt-4">
-                 <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting || disabled}>
                    {submitting ? "Submitting..." : "Submit Renewal"}
                  </Button>
                </div>

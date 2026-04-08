@@ -1,6 +1,7 @@
 "use client";
 
 import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import { djangoApiRequest } from "@/lib/config/django-api";
 import { DJANGO_API_URL, NEXT_PUBLIC_USE_PROXY } from "@/lib/config/django-api";
 import { generateQRDataURL } from "@/lib/qr/qr-utils";
@@ -126,16 +127,33 @@ export async function generateLicensePDF(license: any) {
   pdf.setFontSize(28);
   pdf.setTextColor(gold.r, gold.g, gold.b);
 
-  let typeStr = (license.type || "PROFESSIONAL").toString();
+  let typeStr = (
+    license.license_type ||
+    license.type ||
+    "PROFESSIONAL"
+  ).toString();
   // Map internal types to display names
-  if (typeStr === "Contractor License" || typeStr === "contractor")
+  if (
+    typeStr === "Contractor License" ||
+    typeStr === "contractor" ||
+    typeStr === "profile"
+  )
     typeStr = "CONTRACTOR LICENSE";
-  else if (typeStr === "Import-export License" || typeStr === "import-export")
+  else if (
+    typeStr === "Import-export License" ||
+    typeStr === "import-export" ||
+    typeStr === "company_representative"
+  )
     typeStr = "IMPORT/EXPORT LICENSE";
-  else if (typeStr === "Professional License") typeStr = "PROFESSIONAL LICENSE";
+  else if (typeStr === "Professional License" || typeStr === "professional")
+    typeStr = "PROFESSIONAL LICENSE";
   else typeStr = typeStr.toUpperCase().replace(/_/g, " ");
 
-  if (!typeStr.endsWith(" LICENSE") && !typeStr.endsWith(" PERMIT")) {
+  if (
+    !typeStr.endsWith(" LICENSE") &&
+    !typeStr.endsWith(" PERMIT") &&
+    !typeStr.endsWith(" CERTIFICATE")
+  ) {
     typeStr += " LICENSE";
   }
   // Ensure we don't double up
@@ -168,7 +186,9 @@ export async function generateLicensePDF(license: any) {
     try {
       // If already a data URL, embed directly
       if (typeof photoUrl === "string" && photoUrl.startsWith("data:")) {
-        pdf.addImage(photoUrl, "JPEG", photoX, photoY, photoW, photoH);
+        const mime = photoUrl.split(";")[0].split(":")[1] || "JPEG";
+        const format = mime.split("/")[1]?.toUpperCase() || "JPEG";
+        pdf.addImage(photoUrl, format, photoX, photoY, photoW, photoH);
       } else {
         const resolvedUrl = (() => {
           const s = String(photoUrl);
@@ -199,8 +219,9 @@ export async function generateLicensePDF(license: any) {
             ? window.btoa(binary)
             : Buffer.from(bytes).toString("base64");
         const mime = blob.type || "image/jpeg";
+        const format = mime.split("/")[1]?.toUpperCase() || "JPEG";
         const photoDataUrl = `data:${mime};base64,${b64}`;
-        pdf.addImage(photoDataUrl, "JPEG", photoX, photoY, photoW, photoH);
+        pdf.addImage(photoDataUrl, format, photoX, photoY, photoW, photoH);
       }
     } catch (e) {
       console.warn("Failed to load license photo for PDF", e);
@@ -256,70 +277,147 @@ export async function generateLicensePDF(license: any) {
     align: "center",
   });
 
-  // Professional Position (shown under LICENSE NO. for professional licenses)
-  try {
-    const isProfessional =
-      String((license as any).type || "")
-        .toLowerCase()
-        .includes("professional") ||
-      String((license as any).license_type || "")
-        .toLowerCase()
-        .includes("professional");
+  // --- Sub-Info (Permit Details / Grade / Position) - Now Prominent ---
+  let subInfoText = "";
+  let subInfoLabel = "";
+
+  // 1. Check for Import/Export Permit Details
+  const isImportExport =
+    String(license.license_type || license.type || "")
+      .toLowerCase()
+      .includes("import") ||
+    String(license.license_type || license.type || "")
+      .toLowerCase()
+      .includes("company_representative");
+
+  const isPartnership =
+    String(license.license_type || license.type || "")
+      .toLowerCase()
+      .includes("partnership") ||
+    String(license.license_type || license.type || "")
+      .toLowerCase()
+      .includes("joint_venture") ||
+    String(license.partnership_type || "").length > 0;
+
+  if (isImportExport) {
+    const d =
+      license.data && typeof license.data === "object" ? license.data : {};
+    // Prioritize subtype and permitDetails, then try raw application data
+    const pd =
+      license.subtype ||
+      license.permitDetails ||
+      d.permitDetails ||
+      d.permit_details ||
+      d.subtype;
+
+    if (
+      pd &&
+      String(pd).trim() &&
+      String(pd).toLowerCase() !== "license" &&
+      String(pd).toLowerCase() !== "null"
+    ) {
+      subInfoLabel = "";
+      subInfoText = String(pd).toUpperCase().replace(/-/g, " ");
+    } else {
+      // Last resort: check if category is actually a permit detail
+      const cat = String(license.category || d.category || "").toLowerCase();
+      if (cat.includes("importer") || cat.includes("exporter")) {
+        subInfoLabel = "";
+        subInfoText = cat.toUpperCase().replace(/-/g, " ");
+      }
+    }
+  }
+
+  // 2. Check for Partnership Details
+  if (!subInfoText && isPartnership) {
+    const pt = String(
+      license.partnership_type || license.partnershipType || license.type || "",
+    ).toLowerCase();
+    subInfoLabel = "PARTNERSHIP: ";
+    if (pt.includes("foreign")) subInfoText = "FOREIGN-LOCAL JV";
+    else if (pt.includes("joint")) subInfoText = "JOINT VENTURE";
+    else if (pt.includes("consortium")) subInfoText = "CONSORTIUM";
+    else if (pt.includes("subcontract")) subInfoText = "SUBCONTRACT";
+    else subInfoText = pt.toUpperCase().replace(/_/g, " ");
+  }
+
+  // 3. Check for Professional Position (if no permit details)
+  if (!subInfoText) {
+    const isProfessional = String(license.license_type || license.type || "")
+      .toLowerCase()
+      .includes("professional");
     if (isProfessional) {
-      const d = ((license as any).data && typeof (license as any).data === "object") ? (license as any).data : {};
+      const d =
+        license.data && typeof license.data === "object" ? license.data : {};
       const pos =
-        (license as any).position ??
+        license.position ??
         d.position ??
         d.currentPosition ??
         d.current_position;
       if (pos && String(pos).trim()) {
-        pdf.setFont("times", "bold");
-        pdf.setFontSize(12);
-        pdf.text(`POSITION: ${String(pos).toUpperCase()}`, pageWidth / 2, textY + 6, { align: "center" });
-        pdf.setFont("times", "normal");
-        pdf.setFontSize(11);
+        subInfoLabel = "POSITION: ";
+        subInfoText = String(pos).toUpperCase();
       }
     }
-  } catch {}
+  }
 
-  // Contractor Grade (shown under LICENSE NO. for contractor licenses)
-  try {
+  // 3. Check for Contractor Grade (if still no sub-info)
+  if (!subInfoText) {
     const isContractor =
-      String((license as any).type || "")
+      String(license.license_type || license.type || "")
         .toLowerCase()
         .includes("contractor") ||
-      String((license as any).license_type || "")
+      String(license.license_type || license.type || "")
         .toLowerCase()
-        .includes("contractor");
+        .includes("profile");
     if (isContractor) {
-      const rawGrade =
-        (license as any).grade ??
-        ((license as any).data ? (license as any).data.grade : undefined) ??
-        (license as any).category ??
-        ((license as any).data
-          ? (license as any).data.licenseType ||
-            (license as any).data.category
-          : undefined);
-      let gradeText = "";
+      const d =
+        license.data && typeof license.data === "object" ? license.data : {};
+      const rawGrade = license.grade ?? d.grade ?? d.licenseType ?? d.category;
       if (rawGrade) {
         const rg = String(rawGrade).toLowerCase();
-        if (rg.includes("grade-a") || rg.includes("grade a")) gradeText = "Grade A";
-        else if (rg.includes("grade-b") || rg.includes("grade b")) gradeText = "Grade B";
-        else if (rg.includes("grade-c") || rg.includes("grade c")) gradeText = "Grade C";
-        else if (rg.includes("specialized")) gradeText = "Specialized Contractor";
-        else if (/grade\s*\d+/i.test(String(rawGrade))) gradeText = String(rawGrade);
-        else gradeText = String(rawGrade);
-      }
-      if (gradeText) {
-        pdf.setFont("times", "bold");
-        pdf.setFontSize(12);
-        pdf.setTextColor(black.r, black.g, black.b);
-        pdf.text(`GRADE: ${gradeText}`, pageWidth / 2, textY + 8, { align: "center" });
+        subInfoLabel = "GRADE: ";
+        if (rg.includes("grade-a") || rg.includes("grade a"))
+          subInfoText = "Grade A";
+        else if (rg.includes("grade-b") || rg.includes("grade b"))
+          subInfoText = "Grade B";
+        else if (rg.includes("grade-c") || rg.includes("grade c"))
+          subInfoText = "Grade C";
+        else if (rg.includes("specialized"))
+          subInfoText = "Specialized Contractor";
+        else subInfoText = String(rawGrade).toUpperCase();
       }
     }
-  } catch {}
+  }
+  // 4. Check for Vehicle Details
+  if (!subInfoText) {
+    const isVehicle =
+      String(license.license_type || license.type || "")
+        .toLowerCase()
+        .includes("vehicle") ||
+      (license.data && String(license.data.vehicleType || "").length > 0);
+    if (isVehicle) {
+      const vt = String(
+        license.data?.vehicleType || license.subtype || license.grade || "",
+      ).toUpperCase();
+      if (vt) {
+        subInfoLabel = "VEHICLE: ";
+        subInfoText = vt;
+      }
+    }
+  }
 
-  // Holder Name - preserve original casing but fall back to title case
+  // Render the Prominent Sub-Info
+  if (subInfoText) {
+    pdf.setFont("times", "bold");
+    pdf.setFontSize(24);
+    pdf.setTextColor(gold.r, gold.g, gold.b); // Gold for the category title
+    pdf.text(`${subInfoLabel}${subInfoText}`, pageWidth / 2, textY + 15, {
+      align: "center",
+    });
+  }
+
+  // --- Holder Name (Now under Sub-Info) ---
   const toTitleCase = (s: string) => {
     return s
       .toLowerCase()
@@ -329,58 +427,35 @@ export async function generateLicensePDF(license: any) {
       .join(" ");
   };
   let holderRaw =
-    (license as any).holderName ||
+    (license as any).holder_full_name ||
     (license as any).holder_name ||
-    (license as any).name ||
-    (license as any).applicantName ||
+    (license as any).holderName ||
     (license as any).fullName ||
-    (license as any).ownerFullName ||
+    (license as any).owner ||
     "";
-  if (!holderRaw && (license as any).firstName)
-    holderRaw = `${license.firstName || ""} ${license.lastName || ""}`.trim();
-  const holderDisplay = holderRaw ? holderRaw.trim() : "Unknown Holder";
+  const holderDisplay = holderRaw ? String(holderRaw).trim() : "Unknown Holder";
   const finalHolder = /[a-z]/.test(holderRaw)
     ? holderDisplay
     : toTitleCase(holderDisplay);
+
   pdf.setFont("times", "bold");
-  pdf.setFontSize(24);
-  const holderNameY = (() => {
-    try {
-      const isContractor =
-        String((license as any).type || "").toLowerCase().includes("contractor") ||
-        String((license as any).license_type || "").toLowerCase().includes("contractor");
-      const isProfessional =
-        String((license as any).type || "").toLowerCase().includes("professional") ||
-        String((license as any).license_type || "").toLowerCase().includes("professional");
-      if (!isContractor && !isProfessional) return textY + 12;
-      const d = ((license as any).data && typeof (license as any).data === "object") ? (license as any).data : {};
-      const rawGrade =
-        (license as any).grade ??
-        d.grade ??
-        (license as any).category ??
-        d.licenseType ??
-        d.category;
-      const rawPos =
-        (license as any).position ??
-        d.position ??
-        d.currentPosition ??
-        d.current_position;
-      if (isContractor) return rawGrade ? textY + 20 : textY + 12;
-      if (isProfessional) return rawPos ? textY + 20 : textY + 12;
-      return textY + 12;
-    } catch {
-      return textY + 12;
-    }
-  })();
-  pdf.text(String(finalHolder), pageWidth / 2, holderNameY, { align: "center" });
+  pdf.setFontSize(20);
+  pdf.setTextColor(black.r, black.g, black.b);
 
-  // Separator Line
+  // Clean string to avoid rendering issues
+  const cleanHolder = String(finalHolder).replace(/[^\x20-\x7E]/g, "");
+
+  const holderNameY = subInfoText ? textY + 30 : textY + 15;
+  pdf.text(cleanHolder, pageWidth / 2, holderNameY, { align: "center" });
+
+  // Separator Line (Thin line under Name) - Moved higher and made shorter to avoid overlaps
   pdf.setDrawColor(gold.r, gold.g, gold.b);
-  pdf.setLineWidth(0.5);
-  pdf.line(margin + 20, textY + 20, pageWidth - margin - 20, textY + 20);
+  pdf.setLineWidth(0.3);
+  const lineY = holderNameY + 6;
+  pdf.line(margin + 50, lineY, pageWidth - margin - 50, lineY);
 
-  // 5. License Information Section (Centered Bullet Layout to match image)
-  const infoY = textY + 35;
+  // 5. License Information Section
+  const infoY = lineY + 12;
 
   pdf.setFont("times", "normal");
   pdf.setFontSize(11);
@@ -429,8 +504,11 @@ export async function generateLicensePDF(license: any) {
   // Line 2: Category
   const row2Y = infoY + 8;
   const catLabel = "Category: ";
-  const catVal = String(license.category || "General").toUpperCase();
-  const catText = `${bullet} ${catLabel}${catVal}`;
+  let catVal = String(license.category || "General");
+  if (catVal.toUpperCase() === "LICENSE" && subInfoText) {
+    catVal = subInfoText;
+  }
+  const catText = `${bullet} ${catLabel}${catVal.toUpperCase()}`;
 
   pdf.text(catText, pageWidth / 2, row2Y, { align: "center" });
 
@@ -454,10 +532,6 @@ export async function generateLicensePDF(license: any) {
     pdf.setTextColor(black.r, black.g, black.b);
     pdf.text(statusText, pageWidth / 2, badgeY + 4, { align: "center" });
   }
-
-  // Separator Line 2
-  pdf.setDrawColor(gold.r, gold.g, gold.b);
-  pdf.line(margin + 20, badgeY + 15, pageWidth - margin - 20, badgeY + 15);
 
   // 6. Dates Section
   const datesY = badgeY + 28;
@@ -489,7 +563,6 @@ export async function generateLicensePDF(license: any) {
     });
   const issueStr = formatDate(baseIssueDate);
   const issuedText = `Issued Date: ${issueStr}`;
-  
 
   // Expiry Date (Right)
   pdf.setFont("times", "normal");
@@ -506,8 +579,41 @@ export async function generateLicensePDF(license: any) {
   // 7. Verification & Approval
   const bottomY = pageHeight - margin - 20;
 
-  // QR Code (Left)
-  if (license.qrDataUrl) {
+  // QR Code (Left) - Generate if missing
+  let qrDataUrl = license.qrDataUrl;
+  if (!qrDataUrl) {
+    try {
+      const baseUrl =
+        typeof window !== "undefined"
+          ? window.location.origin
+          : "http://localhost:3000";
+      const displayNumber =
+        license.license_number ||
+        license.licenseNumber ||
+        license.registrationNumber ||
+        license.id ||
+        "";
+      const verificationUrl = `${baseUrl}/verify?licenseNumber=${encodeURIComponent(String(displayNumber))}`;
+      const payload = {
+        licenseId: String(license.id || ""),
+        licenseNumber: String(displayNumber),
+        holderName: holderDisplay,
+        companyName: companyVal,
+        type: typeVal,
+        issueDate: issueStr,
+        expiryDate: expiryStr,
+        verificationUrl,
+        generatedAt: new Date().toISOString(),
+      };
+      qrDataUrl = await generateQRDataURL(JSON.stringify(payload), {
+        width: 300,
+      });
+    } catch (e) {
+      console.warn("Failed to generate QR for PDF", e);
+    }
+  }
+
+  if (qrDataUrl) {
     const qrSize = 35;
     const qrX = margin + 10;
     const qrY = bottomY - qrSize + 5;
@@ -519,7 +625,7 @@ export async function generateLicensePDF(license: any) {
     const expiryYAboveQR = qrY - 2;
     pdf.text(issuedText, dateX, issuedYAboveQR);
     pdf.text(expiryText, dateX, expiryYAboveQR);
-    pdf.addImage(license.qrDataUrl, "PNG", qrX, qrY, qrSize, qrSize);
+    pdf.addImage(qrDataUrl, "PNG", qrX, qrY, qrSize, qrSize);
   } else {
     pdf.setFont("times", "normal");
     pdf.setFontSize(11);
@@ -673,6 +779,235 @@ export async function generateLicensePDF(license: any) {
   return pdf;
 }
 
+export async function generateReceiptPDF(payment: any) {
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 15;
+
+  // Colors
+  const darkBlue = { r: 13, g: 27, b: 62 };
+  const limeGreen = { r: 141, g: 198, b: 63 };
+  const lightGrey = { r: 245, g: 245, b: 245 };
+  const textGrey = { r: 100, g: 100, b: 100 };
+
+  // 1. Header Section
+  pdf.setFillColor(darkBlue.r, darkBlue.g, darkBlue.b);
+  pdf.rect(0, 0, pageWidth, 25, "F");
+
+  // Logo Placeholder (Stylized "C" for Chapa)
+  const logoX = 18;
+  const logoY = 12.5;
+  pdf.setFillColor(limeGreen.r, limeGreen.g, limeGreen.b);
+  pdf.circle(logoX, logoY, 6, "F");
+  pdf.setFillColor(darkBlue.r, darkBlue.g, darkBlue.b);
+  pdf.circle(logoX + 1.5, logoY, 4.5, "F");
+  pdf.setFillColor(limeGreen.r, limeGreen.g, limeGreen.b);
+  pdf.rect(logoX + 1, logoY - 2, 5, 4, "F"); // This creates the "C" opening
+
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(18);
+  pdf.text("Chapa", 28, 14.5);
+
+  // RECEIPT Title
+  pdf.setTextColor(limeGreen.r, limeGreen.g, limeGreen.b);
+  pdf.setFontSize(28);
+  pdf.text("RECEIPT", pageWidth - margin - 5, 16, { align: "right" });
+
+  // 2. Info Columns
+  let yPos = 40;
+  pdf.setFontSize(10);
+  pdf.setTextColor(limeGreen.r, limeGreen.g, limeGreen.b);
+  pdf.setFont("helvetica", "bold");
+  pdf.text("Receipt From", margin, yPos);
+
+  pdf.setTextColor(0, 0, 0);
+  yPos += 7;
+  pdf.text("Chapa Test", margin, yPos);
+  pdf.setFont("helvetica", "normal");
+  yPos += 5;
+  pdf.text("TIN 007756####", margin, yPos);
+  yPos += 5;
+  pdf.text("Phone No. 8911", margin, yPos);
+  yPos += 5;
+  pdf.text("Address Bole Rwanda", margin, yPos);
+
+  // Right column (Chapa details)
+  let rightY = 40;
+  pdf.setFont("helvetica", "bold");
+  pdf.text("Chapa Financial Technologies S.C", pageWidth - margin, rightY, {
+    align: "right",
+  });
+  pdf.setFont("helvetica", "normal");
+  rightY += 5;
+  pdf.text("TIN 0071406415", pageWidth - margin, rightY, { align: "right" });
+  rightY += 5;
+  pdf.text("VAT Reg. 18595770010", pageWidth - margin, rightY, {
+    align: "right",
+  });
+  rightY += 5;
+  pdf.text("Phone No. +251-960724272", pageWidth - margin, rightY, {
+    align: "right",
+  });
+  rightY += 5;
+  pdf.text("Website chapa.co", pageWidth - margin, rightY, { align: "right" });
+
+  // 3. Payment Details Banner
+  yPos = 75;
+  pdf.setFillColor(limeGreen.r, limeGreen.g, limeGreen.b);
+  pdf.rect(margin, yPos, pageWidth / 2, 10, "F");
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(11);
+  pdf.text("PAYMENT DETAILS", margin + 5, yPos + 6.5);
+
+  // Reference Code Box (Wider to fit long references)
+  pdf.setFillColor(darkBlue.r, darkBlue.g, darkBlue.b);
+  const refBoxW = 85;
+  pdf.rect(pageWidth - margin - refBoxW, yPos, refBoxW, 10, "F");
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFontSize(8); // Smaller font for reference
+  const displayRef = (payment.tx_ref || "REFERENCE").substring(0, 35);
+  pdf.text(displayRef, pageWidth - margin - refBoxW / 2, yPos + 6.5, {
+    align: "center",
+  });
+
+  // 4. Details Table (Removed Amharic labels as they cause corruption without custom font)
+  yPos += 15;
+  const tableData = [
+    ["Payer Name", payment.payer_name || "Full name"],
+    ["Phone Number", payment.phone_number || "25194176####"],
+    ["Email Address", payment.email || "email"],
+    ["Payment Method", payment.payment_method || "telebirr"],
+    ["Status", "Paid"],
+    [
+      "Payment Date",
+      payment.payment_date ||
+        new Date().toLocaleDateString("en-GB").replace(/\//g, "-"),
+    ],
+    ["Payment Due", "Paid to Merchant via Payment Link"],
+  ];
+
+  tableData.forEach((row, i) => {
+    if (i % 2 === 0) {
+      pdf.setFillColor(lightGrey.r, lightGrey.g, lightGrey.b);
+      pdf.rect(margin, yPos, pageWidth - 2 * margin, 8, "F");
+    }
+    pdf.setTextColor(textGrey.r, textGrey.g, textGrey.b);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+    pdf.text(row[0], margin + 5, yPos + 5.5);
+
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(10);
+    pdf.text(String(row[1]), pageWidth - margin - 5, yPos + 5.5, {
+      align: "right",
+    });
+
+    yPos += 8;
+  });
+
+  // 5. References & Totals
+  yPos += 15;
+  pdf.setTextColor(limeGreen.r, limeGreen.g, limeGreen.b);
+  pdf.setFontSize(11);
+  pdf.text("References", margin, yPos);
+
+  pdf.setTextColor(0, 0, 0);
+  pdf.setFontSize(10);
+  yPos += 7;
+  pdf.setFont("helvetica", "bold");
+  pdf.text("Chapa:", margin, yPos);
+  pdf.setFont("helvetica", "normal");
+  pdf.text(payment.tx_ref || "N/A", margin + 15, yPos);
+
+  yPos += 5;
+  pdf.setFont("helvetica", "bold");
+  pdf.text("Bank:", margin, yPos);
+  pdf.setFont("helvetica", "normal");
+  pdf.text(payment.bank_ref || "CGO3PAXUSH", margin + 15, yPos);
+
+  // Totals (Right side)
+  let totalY = yPos - 12;
+  const totalAmount = parseFloat(payment.amount || "0");
+  const subTotal = totalAmount / 1.025; // Reverse calculate subtotal if amount is total
+  const charge = totalAmount - subTotal;
+
+  const totalLines = [
+    ["Sub Total", `${subTotal.toFixed(0)} ETB`],
+    ["Charge", `${charge.toFixed(0)} ETB`],
+    ["Total", `${totalAmount.toFixed(0)} ETB`],
+  ];
+
+  totalLines.forEach((line, i) => {
+    pdf.setTextColor(textGrey.r, textGrey.g, textGrey.b);
+    pdf.setFont("helvetica", i === 2 ? "bold" : "normal");
+    pdf.setFontSize(10);
+    pdf.text(line[0], pageWidth - margin - 45, totalY, { align: "right" });
+
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFont("helvetica", "bold");
+    pdf.text(line[1], pageWidth - margin - 5, totalY, { align: "right" });
+    totalY += 7;
+  });
+
+  // 6. Seal
+  const sealSize = 45;
+  const sealX = pageWidth / 2;
+  const sealY = yPos + 5;
+  const sealBlue = { r: 37, g: 99, b: 235 }; // blue-600
+
+  // Main outer circle
+  pdf.setDrawColor(sealBlue.r, sealBlue.g, sealBlue.b);
+  pdf.setLineWidth(1.2); // border-4
+  pdf.circle(sealX, sealY + sealSize / 2, sealSize / 2, "S");
+
+  // Inner circle
+  pdf.setLineWidth(0.6); // border-2
+  pdf.circle(sealX, sealY + sealSize / 2, sealSize / 2 - 3.5, "S");
+
+  // Text layers based on the provided React component structure
+  pdf.setFont("helvetica", "bold");
+
+  // Top text - CHAPA
+  pdf.setFontSize(8);
+  pdf.text("CHAPA", sealX, sealY + 12, { align: "center" });
+
+  // Middle text - FINANCIAL
+  pdf.setFontSize(6.5);
+  pdf.text("FINANCIAL", sealX, sealY + 18, { align: "center" });
+
+  // Bottom text - TECHNOLOGIES
+  pdf.setFontSize(6.5);
+  pdf.text("TECHNOLOGIES", sealX, sealY + 24, { align: "center" });
+
+  // S.C. text at bottom
+  pdf.setFontSize(6);
+  pdf.text("S.C", sealX, sealY + sealSize - 8, { align: "center" });
+
+  // Decorative dot at the top
+  pdf.setFillColor(sealBlue.r, sealBlue.g, sealBlue.b);
+  pdf.circle(sealX, sealY + 4, 0.5, "F");
+
+  // 7. Footer
+  pdf.setFillColor(darkBlue.r, darkBlue.g, darkBlue.b);
+  pdf.rect(0, pageHeight - 15, pageWidth, 15, "F");
+
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFontSize(9);
+  pdf.text("+251-960724272", margin + 10, pageHeight - 6);
+  pdf.text("info@chapa.co", margin + 55, pageHeight - 6);
+
+  pdf.setFont("helvetica", "bold");
+  pdf.text("Thank You For Using Chapa", pageWidth - margin, pageHeight - 6, {
+    align: "right",
+  });
+
+  return pdf;
+}
+
 export async function generateApplicationPDF(application: {
   id: string;
   type: string;
@@ -789,115 +1124,235 @@ export async function generateReportPDF(config: {
 }) {
   const pdf = new jsPDF("p", "mm", "a4");
   const pageWidth = pdf.internal.pageSize.getWidth();
-  const margin = 15;
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 20;
 
-  // Header
-  pdf.setFillColor(37, 99, 235);
-  pdf.rect(0, 0, pageWidth, 40, "F");
+  // Colors
+  const primary = { r: 30, g: 58, b: 138 }; // Dark blue
+  const accent = { r: 59, g: 130, b: 246 }; // Brighter blue
+  const grey = { r: 107, g: 114, b: 128 };
+  const lightGrey = { r: 243, g: 244, b: 246 };
+
+  // Helper for text wrapping and auto-paging
+  let yPos = margin;
+  const checkPage = (height: number) => {
+    if (yPos + height > pageHeight - margin) {
+      pdf.addPage();
+      yPos = margin;
+      return true;
+    }
+    return false;
+  };
+
+  // 1. Header with Logo placeholder and Title
+  pdf.setFillColor(primary.r, primary.g, primary.b);
+  pdf.rect(0, 0, pageWidth, 45, "F");
 
   pdf.setTextColor(255, 255, 255);
-  pdf.setFontSize(24);
-  const reportTitle =
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(22);
+  const reportTitle = (
     config.reportType.charAt(0).toUpperCase() +
-    config.reportType.slice(1).replace(/([A-Z])/g, " $1");
-  pdf.text(reportTitle.toUpperCase() + " REPORT", pageWidth / 2, 15, {
+    config.reportType.slice(1).replace(/([A-Z])/g, " $1")
+  ).toUpperCase();
+  pdf.text(`${reportTitle} REPORT`, pageWidth / 2, 20, { align: "center" });
+
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(10);
+  pdf.text(`Construction License Management System (CLMS)`, pageWidth / 2, 28, {
     align: "center",
   });
-  pdf.setFontSize(10);
   pdf.text(
-    `Generated: ${new Date().toLocaleDateString()} | Period: ${config.timeRange}`,
+    `Generated on: ${new Date().toLocaleDateString()} | Period: ${config.timeRange.toUpperCase()}`,
     pageWidth / 2,
-    28,
-    {
-      align: "center",
-    },
+    34,
+    { align: "center" },
   );
+
+  yPos = 55;
+
+  // 2. Executive Summary
+  pdf.setTextColor(primary.r, primary.g, primary.b);
+  pdf.setFontSize(14);
+  pdf.setFont("helvetica", "bold");
+  pdf.text("Executive Summary", margin, yPos);
+  yPos += 8;
 
   pdf.setTextColor(0, 0, 0);
   pdf.setFontSize(10);
-  let yPosition = 55;
+  pdf.setFont("helvetica", "normal");
+  const summary =
+    `This ${config.reportType} report provides a comprehensive analysis of system activity during the ${config.timeRange} period. ` +
+    `A total of ${config.data.length} records were analyzed. This document contains detailed breakdowns, key performance metrics, and system-wide trends ` +
+    `to assist in administrative decision-making and compliance monitoring.`;
 
-  // Executive Summary
-  pdf.setFontSize(12);
-  pdf.setFont(undefined as any, "bold");
-  pdf.text("Executive Summary", margin, yPosition);
-  yPosition += 8;
-  pdf.setFont(undefined as any, "normal");
-  pdf.setFontSize(9);
-
-  const summary = `This report provides a comprehensive overview of ${config.reportType} for the ${config.timeRange} period. The data includes ${config.data.length} records analyzed for trends, patterns, and key metrics.`;
   const summaryLines = pdf.splitTextToSize(summary, pageWidth - 2 * margin);
-  pdf.text(summaryLines, margin, yPosition);
-  yPosition += summaryLines.length * 5 + 5;
+  pdf.text(summaryLines, margin, yPos);
+  yPos += summaryLines.length * 5 + 12;
 
-  // Data Table
+  // 3. Key Metrics Grid
+  pdf.setTextColor(primary.r, primary.g, primary.b);
+  pdf.setFontSize(14);
+  pdf.setFont("helvetica", "bold");
+  pdf.text("Key Metrics", margin, yPos);
+  yPos += 8;
+
+  const boxW = (pageWidth - 2 * margin - 10) / 3;
+  const boxH = 25;
+
+  const drawMetricBox = (
+    x: number,
+    y: number,
+    label: string,
+    value: string,
+  ) => {
+    pdf.setDrawColor(lightGrey.r, lightGrey.g, lightGrey.b);
+    pdf.setFillColor(lightGrey.r, lightGrey.g, lightGrey.b);
+    pdf.roundedRect(x, y, boxW, boxH, 2, 2, "F");
+
+    pdf.setFontSize(9);
+    pdf.setTextColor(grey.r, grey.g, grey.b);
+    pdf.setFont("helvetica", "normal");
+    pdf.text(label, x + boxW / 2, y + 8, { align: "center" });
+
+    pdf.setFontSize(12);
+    pdf.setTextColor(primary.r, primary.g, primary.b);
+    pdf.setFont("helvetica", "bold");
+    pdf.text(value, x + boxW / 2, y + 18, { align: "center" });
+  };
+
+  drawMetricBox(margin, yPos, "Total Records", config.data.length.toString());
+  drawMetricBox(margin + boxW + 5, yPos, "Report Format", "PDF Document");
+  drawMetricBox(margin + (boxW + 5) * 2, yPos, "Status", "Official");
+
+  yPos += boxH + 15;
+
+  // 4. Detailed Data Table
   if (config.includeDetails && config.data.length > 0) {
-    pdf.setFontSize(11);
-    pdf.setFont(undefined as any, "bold");
-    pdf.text("Data Details", margin, yPosition);
-    yPosition += 8;
-    pdf.setFont(undefined as any, "normal");
+    checkPage(20);
+    pdf.setTextColor(primary.r, primary.g, primary.b);
+    pdf.setFontSize(14);
+    pdf.setFont("helvetica", "bold");
+    pdf.text("Data Breakdown", margin, yPos);
+    yPos += 8;
+
+    const tableHeaders = [
+      "ID",
+      "Type",
+      "Applicant",
+      "Company",
+      "Status",
+      "Date",
+    ];
+    const colWidths = [12, 33, 40, 35, 30, 20]; // Total: 170mm (fits perfectly in 210mm A4 with 20mm margins)
+
+    // Header Row
+    pdf.setFillColor(primary.r, primary.g, primary.b);
+    pdf.rect(margin, yPos, pageWidth - 2 * margin, 8, "F");
+
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFontSize(9);
+    pdf.setFont("helvetica", "bold");
+
+    let curX = margin;
+    tableHeaders.forEach((header, i) => {
+      pdf.text(header, curX + 2, yPos + 5.5);
+      curX += colWidths[i];
+    });
+
+    yPos += 8;
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFont("helvetica", "normal");
     pdf.setFontSize(8);
 
-    // Column headers
-    const columns = Object.keys(config.data[0]);
-    const columnWidth = (pageWidth - 2 * margin) / columns.length;
-
-    // Header row
-    pdf.setFillColor(37, 99, 235);
-    pdf.setTextColor(255, 255, 255);
-    columns.forEach((col, index) => {
-      pdf.text(
-        col.toUpperCase().substring(0, 15),
-        margin + index * columnWidth + 2,
-        yPosition,
-      );
-    });
-    yPosition += 6;
-
-    // Data rows
-    pdf.setTextColor(0, 0, 0);
-    config.data.slice(0, 10).forEach((row) => {
-      columns.forEach((col, index) => {
-        const value = String(row[col]).substring(0, 20);
-        pdf.text(value, margin + index * columnWidth + 2, yPosition);
-      });
-      yPosition += 5;
-      if (yPosition > 270) {
-        pdf.addPage();
-        yPosition = 15;
+    // Data Rows (Limit to first 30 for readability, or use auto-paging)
+    config.data.slice(0, 30).forEach((row, rowIndex) => {
+      if (checkPage(7)) {
+        // Redraw headers on new page
+        pdf.setFillColor(primary.r, primary.g, primary.b);
+        pdf.rect(margin, yPos, pageWidth - 2 * margin, 8, "F");
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont("helvetica", "bold");
+        let hX = margin;
+        tableHeaders.forEach((h, i) => {
+          pdf.text(h, hX + 2, yPos + 5.5);
+          hX += colWidths[i];
+        });
+        yPos += 8;
+        pdf.setTextColor(0, 0, 0);
+        pdf.setFont("helvetica", "normal");
       }
+
+      // Zebra striping
+      if (rowIndex % 2 === 1) {
+        pdf.setFillColor(250, 250, 250);
+        pdf.rect(margin, yPos, pageWidth - 2 * margin, 7, "F");
+      }
+
+      let rowX = margin;
+      const formatDate = (dateVal: any) => {
+        try {
+          const d = new Date(dateVal);
+          if (isNaN(d.getTime())) return "N/A";
+          const dd = String(d.getDate()).padStart(2, "0");
+          const mm = String(d.getMonth() + 1).padStart(2, "0");
+          const yyyy = d.getFullYear();
+          return `${dd}/${mm}/${yyyy}`;
+        } catch {
+          return "N/A";
+        }
+      };
+
+      const rowData = [
+        String(row.id || "").substring(0, 8),
+        String(row.type || "").substring(0, 25),
+        String(row.applicantName || "").substring(0, 30),
+        String(row.companyName || "").substring(0, 25),
+        String(row.status || "")
+          .toUpperCase()
+          .replace(/_/g, " "),
+        formatDate(row.submittedDate),
+      ];
+
+      rowData.forEach((val, i) => {
+        pdf.text(val, rowX + 2, yPos + 4.5);
+        rowX += colWidths[i];
+      });
+      yPos += 7;
     });
+
+    if (config.data.length > 30) {
+      pdf.setFontSize(8);
+      pdf.setTextColor(grey.r, grey.g, grey.b);
+      pdf.text(
+        `... and ${config.data.length - 30} more records.`,
+        margin,
+        yPos + 5,
+      );
+      yPos += 10;
+    }
   }
 
-  // Key Metrics
-  yPosition += 5;
-  pdf.setFont(undefined as any, "bold");
-  pdf.setFontSize(11);
-  pdf.text("Key Metrics", margin, yPosition);
-  yPosition += 8;
-  pdf.setFont(undefined as any, "normal");
-  pdf.setFontSize(9);
-
-  const metrics = [
-    [`Total Records: ${config.data.length}`],
-    [`Report Period: ${config.timeRange}`],
-    [`Generated: ${new Date().toLocaleDateString()}`],
-  ];
-
-  metrics.forEach(([metric]) => {
-    pdf.text(metric, margin, yPosition);
-    yPosition += 6;
-  });
-
-  // Footer
-  pdf.setFontSize(8);
-  pdf.setTextColor(128, 128, 128);
-  pdf.text(
-    "Confidential - Construction License Management System",
-    margin,
-    285,
-  );
+  // 5. Footer
+  const totalPages = (pdf.internal as any).getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    pdf.setPage(i);
+    pdf.setDrawColor(lightGrey.r, lightGrey.g, lightGrey.b);
+    pdf.line(margin, pageHeight - 15, pageWidth - margin, pageHeight - 15);
+    pdf.setFontSize(8);
+    pdf.setTextColor(grey.r, grey.g, grey.b);
+    pdf.text(
+      "Confidential Official Report - Oromia Construction Authority",
+      margin,
+      pageHeight - 10,
+    );
+    pdf.text(
+      `Page ${i} of ${totalPages}`,
+      pageWidth - margin,
+      pageHeight - 10,
+      { align: "right" },
+    );
+  }
 
   return pdf;
 }
@@ -920,22 +1375,42 @@ export async function generateVehicleCertificatePDF(vehicle: any) {
   pdf.setTextColor(235, 235, 235);
   pdf.setFont("times", "bold");
   pdf.setFontSize(28);
-  pdf.text("CLMS OFFICIAL DOCUMENT", pageWidth / 2, pageHeight / 2, { align: "center" });
+  pdf.text("CLMS OFFICIAL DOCUMENT", pageWidth / 2, pageHeight / 2, {
+    align: "center",
+  });
   // Reset text color for normal content
   pdf.setTextColor(dark.r, dark.g, dark.b);
   pdf.setFont("times", "bold");
   pdf.setFontSize(18);
   pdf.setTextColor(dark.r, dark.g, dark.b);
-  pdf.text("Oromia Construction Authority", pageWidth / 2, 26, { align: "center" });
+  pdf.text("Oromia Construction Authority", pageWidth / 2, 26, {
+    align: "center",
+  });
   pdf.setFont("times", "normal");
   pdf.setFontSize(12);
-  pdf.text("Construction License Management System (CLMS)", pageWidth / 2, 34, { align: "center" });
+  pdf.text("Construction License Management System (CLMS)", pageWidth / 2, 34, {
+    align: "center",
+  });
+  const v = vehicle?.data || {};
+  const isHeavy = v.registrationCategory === "heavy-machinery";
+
   pdf.setFont("times", "bold");
   pdf.setFontSize(20);
-  pdf.text("Vehicle Registration Certificate", pageWidth / 2, 47, { align: "center" });
+  pdf.text(
+    isHeavy
+      ? "Heavy Machinery Registration"
+      : "Vehicle Registration Certificate",
+    pageWidth / 2,
+    47,
+    { align: "center" },
+  );
   const certYear = new Date().getFullYear();
-  const certSeq = String(vehicle?.id || "1").toString().padStart(5, "0");
-  const certNo = `CLMS-VEH-${certYear}-${certSeq}`;
+  const certSeq = String(vehicle?.id || "1")
+    .toString()
+    .padStart(5, "0");
+  const certNo = isHeavy
+    ? `CLMS-HM-${certYear}-${certSeq}`
+    : `CLMS-VEH-${certYear}-${certSeq}`;
   pdf.setFont("times", "normal");
   pdf.setFontSize(11);
   pdf.setTextColor(grey.r, grey.g, grey.b);
@@ -946,7 +1421,6 @@ export async function generateVehicleCertificatePDF(vehicle: any) {
   const leftX = 22;
   const rightX = pageWidth / 2 + 5;
   let y = 68;
-  const v = vehicle?.data || {};
   const toStr = (s: any, fallback = "N/A") => {
     if (s === null || s === undefined) return fallback;
     const t = String(s).trim();
@@ -994,7 +1468,11 @@ export async function generateVehicleCertificatePDF(vehicle: any) {
   pdf.setFontSize(12);
   pdf.text("3. Registration Validity", leftX, y);
   y += 6;
-  const issueDate = v.issueDate || vehicle?.registeredAt || vehicle?.created_at || new Date().toISOString();
+  const issueDate =
+    v.issueDate ||
+    vehicle?.registeredAt ||
+    vehicle?.created_at ||
+    new Date().toISOString();
   const expiryDate = v.expiryDate || v.insuranceExpiry || "";
   const status = String(vehicle?.status || "pending").toLowerCase();
   const isActive = status === "active";
@@ -1013,7 +1491,9 @@ export async function generateVehicleCertificatePDF(vehicle: any) {
   pdf.text(expiryStr, validityRightX - 35, y, { align: "left" });
   // Right value aligned right next to label
   pdf.setFont("times", "normal");
-  const expiryDisplay = expiryDate ? new Date(expiryDate).toLocaleDateString() : "N/A";
+  const expiryDisplay = expiryDate
+    ? new Date(expiryDate).toLocaleDateString()
+    : "N/A";
   pdf.text(expiryDisplay, validityRightX - 35 + 28, y, { align: "left" });
   y += 8;
   if (isActive) {
@@ -1063,55 +1543,72 @@ export async function generateVehicleCertificatePDF(vehicle: any) {
   };
   let qrY = y + 5;
   try {
-    const qrDataUrl = await generateQRDataURL(JSON.stringify(payload), { width: 120, margin: 1 });
+    const qrDataUrl = await generateQRDataURL(JSON.stringify(payload), {
+      width: 120,
+      margin: 1,
+    });
     pdf.addImage(qrDataUrl, "PNG", leftX, qrY, 30, 30);
   } catch {}
   pdf.setFont("times", "normal");
   pdf.setFontSize(11);
   pdf.text(`Certificate Serial Number: ${serial}`, leftX + 36, qrY + 10);
   try {
-    const tryAddSignature = async (candidateUrl: string, mime: "PNG" | "JPEG" | "WEBP") => {
-      const resp = await fetch(candidateUrl)
-      if (!resp.ok) return false
-      const blob = await resp.blob()
-      const reader = new FileReader()
+    const tryAddSignature = async (
+      candidateUrl: string,
+      mime: "PNG" | "JPEG" | "WEBP",
+    ) => {
+      const resp = await fetch(candidateUrl);
+      if (!resp.ok) return false;
+      const blob = await resp.blob();
+      const reader = new FileReader();
       const dataUrl: string = await new Promise((resolve) => {
-        reader.onloadend = () => resolve(String(reader.result || ""))
-        reader.readAsDataURL(blob)
-      })
-      if (!dataUrl) return false
-      const sigW = 18
-      const sigH = 6
-      pdf.addImage(dataUrl, mime, pageWidth - 86, qrY + 18, sigW, sigH)
-      return true
-    }
+        reader.onloadend = () => resolve(String(reader.result || ""));
+        reader.readAsDataURL(blob);
+      });
+      if (!dataUrl) return false;
+      const sigW = 18;
+      const sigH = 6;
+      pdf.addImage(dataUrl, mime, pageWidth - 86, qrY + 18, sigW, sigH);
+      return true;
+    };
     const manualDataUrl = (() => {
       try {
         if (typeof window !== "undefined") {
-          const s = window.localStorage.getItem("clms_signature_dataurl")
-          return s && s.startsWith("data:image/") ? s : null
+          const s = window.localStorage.getItem("clms_signature_dataurl");
+          return s && s.startsWith("data:image/") ? s : null;
         }
       } catch {}
-      return null
-    })()
+      return null;
+    })();
     if (manualDataUrl) {
-      const sigW = 18
-      const sigH = 6
-      const mime = manualDataUrl.includes("image/jpeg") ? "JPEG" : manualDataUrl.includes("image/webp") ? "WEBP" : "PNG"
-      pdf.addImage(manualDataUrl, mime as any, pageWidth - 86, qrY + 18, sigW, sigH)
+      const sigW = 18;
+      const sigH = 6;
+      const mime = manualDataUrl.includes("image/jpeg")
+        ? "JPEG"
+        : manualDataUrl.includes("image/webp")
+          ? "WEBP"
+          : "PNG";
+      pdf.addImage(
+        manualDataUrl,
+        mime as any,
+        pageWidth - 86,
+        qrY + 18,
+        sigW,
+        sigH,
+      );
     } else {
       const tried =
         (await tryAddSignature(`/signatures/authorized.png`, "PNG")) ||
         (await tryAddSignature(`/signatures/authorized.webp`, "WEBP")) ||
         (await tryAddSignature(`/signatures/authorized.jpg`, "JPEG")) ||
         (await tryAddSignature(`/authorized.png`, "PNG")) ||
-        (await tryAddSignature(`/signature.png`, "PNG"))
+        (await tryAddSignature(`/signature.png`, "PNG"));
       if (!tried) {
-        pdf.text("Authorized Signature", pageWidth - 80, qrY + 25)
+        pdf.text("Authorized Signature", pageWidth - 80, qrY + 25);
       }
     }
   } catch {
-    pdf.text("Authorized Signature", pageWidth - 80, qrY + 25)
+    pdf.text("Authorized Signature", pageWidth - 80, qrY + 25);
   }
   pdf.setLineWidth(0.5);
   pdf.line(pageWidth - 120, qrY + 28, pageWidth - 40, qrY + 28);
@@ -1137,13 +1634,20 @@ export async function generatePartnershipPDF(p: any) {
   pdf.rect(margin, margin, pageWidth - margin * 2, pageHeight - margin * 2);
   pdf.setDrawColor(navy.r, navy.g, navy.b);
   pdf.setLineWidth(2);
-  pdf.rect(margin + 5, margin + 5, pageWidth - (margin + 5) * 2, pageHeight - (margin + 5) * 2);
+  pdf.rect(
+    margin + 5,
+    margin + 5,
+    pageWidth - (margin + 5) * 2,
+    pageHeight - (margin + 5) * 2,
+  );
 
   const headerY = margin + 18;
   pdf.setFont("times", "bold");
   pdf.setFontSize(30);
   pdf.setTextColor(navy.r, navy.g, navy.b);
-  pdf.text("CONSTRUCTION PARTNERSHIP LICENSE", pageWidth / 2, headerY, { align: "center" });
+  pdf.text("CONSTRUCTION PARTNERSHIP LICENSE", pageWidth / 2, headerY, {
+    align: "center",
+  });
 
   const ribbonY = headerY + 10;
   const ribbonW = 160;
@@ -1153,21 +1657,39 @@ export async function generatePartnershipPDF(p: any) {
   pdf.rect(ribbonX, ribbonY, ribbonW, ribbonH, "F");
   pdf.setTextColor(255, 255, 255);
   pdf.setFontSize(14);
-  pdf.text("CERTIFICATE OF PARTNERSHIP", pageWidth / 2, ribbonY + ribbonH - 3.5, { align: "center" });
+  pdf.text(
+    "CERTIFICATE OF PARTNERSHIP",
+    pageWidth / 2,
+    ribbonY + ribbonH - 3.5,
+    { align: "center" },
+  );
 
   pdf.setTextColor(black.r, black.g, black.b);
   pdf.setFont("times", "italic");
   pdf.setFontSize(12);
-  pdf.text("This certifies that the following partnership is legally registered and approved:", pageWidth / 2, ribbonY + ribbonH + 8, { align: "center" });
+  pdf.text(
+    "This certifies that the following partnership is legally registered and approved:",
+    pageWidth / 2,
+    ribbonY + ribbonH + 8,
+    { align: "center" },
+  );
 
   const blockY = ribbonY + ribbonH + 22;
   const colW = 75;
   const centerX = pageWidth / 2;
 
-  const leftName = (p?.main_contractor?.name || "LOCAL BUILDER LTD.").toString().toUpperCase();
-  const leftLic = p?.main_contractor?.license_number ? `License No. ${p.main_contractor.license_number}` : "License No. -";
-  const rightName = (p?.partner_company?.name || "GLOBAL INFRASTRUCTURE INC.").toString().toUpperCase();
-  const rightLic = p?.partner_company?.license_number ? `License No. ${p.partner_company.license_number}` : "License No. -";
+  const leftName = (p?.main_contractor?.name || "LOCAL BUILDER LTD.")
+    .toString()
+    .toUpperCase();
+  const leftLic = p?.main_contractor?.license_number
+    ? `License No. ${p.main_contractor.license_number}`
+    : "License No. -";
+  const rightName = (p?.partner_company?.name || "GLOBAL INFRASTRUCTURE INC.")
+    .toString()
+    .toUpperCase();
+  const rightLic = p?.partner_company?.license_number
+    ? `License No. ${p.partner_company.license_number}`
+    : "License No. -";
 
   pdf.setFont("times", "bold");
   pdf.setFontSize(16);
@@ -1178,10 +1700,16 @@ export async function generatePartnershipPDF(p: any) {
   pdf.text(rightLines, centerX + colW, blockY, { align: "center" });
   pdf.setFont("times", "italic");
   pdf.setFontSize(11);
-  const leftNameHeight = (Array.isArray(leftLines) ? leftLines.length : 1) * lineSpacing;
-  const rightNameHeight = (Array.isArray(rightLines) ? rightLines.length : 1) * lineSpacing;
-  pdf.text(`– ${leftLic} –`, centerX - colW, blockY + leftNameHeight + 2, { align: "center" });
-  pdf.text(`– ${rightLic} –`, centerX + colW, blockY + rightNameHeight + 2, { align: "center" });
+  const leftNameHeight =
+    (Array.isArray(leftLines) ? leftLines.length : 1) * lineSpacing;
+  const rightNameHeight =
+    (Array.isArray(rightLines) ? rightLines.length : 1) * lineSpacing;
+  pdf.text(`– ${leftLic} –`, centerX - colW, blockY + leftNameHeight + 2, {
+    align: "center",
+  });
+  pdf.text(`– ${rightLic} –`, centerX + colW, blockY + rightNameHeight + 2, {
+    align: "center",
+  });
 
   // Handshake badge between companies
   const handshakeSize = 32;
@@ -1202,25 +1730,25 @@ export async function generatePartnershipPDF(p: any) {
       ctx.lineCap = "round";
       // Left sleeve
       ctx.fillStyle = "#0f2a44";
-      ctx.fillRect(size * 0.15, size * 0.52, size * 0.18, size * 0.10);
+      ctx.fillRect(size * 0.15, size * 0.52, size * 0.18, size * 0.1);
       // Right sleeve
-      ctx.fillRect(size * 0.67, size * 0.52, size * 0.18, size * 0.10);
+      ctx.fillRect(size * 0.67, size * 0.52, size * 0.18, size * 0.1);
       // Left hand
       ctx.fillStyle = "#f0caa0";
       ctx.beginPath();
       ctx.moveTo(size * 0.22, size * 0.52);
-      ctx.quadraticCurveTo(size * 0.40, size * 0.45, size * 0.50, size * 0.52);
+      ctx.quadraticCurveTo(size * 0.4, size * 0.45, size * 0.5, size * 0.52);
       ctx.lineTo(size * 0.46, size * 0.65);
-      ctx.quadraticCurveTo(size * 0.36, size * 0.60, size * 0.22, size * 0.62);
+      ctx.quadraticCurveTo(size * 0.36, size * 0.6, size * 0.22, size * 0.62);
       ctx.closePath();
       ctx.fill();
       // Right hand
       ctx.fillStyle = "#d8a779";
       ctx.beginPath();
       ctx.moveTo(size * 0.78, size * 0.52);
-      ctx.quadraticCurveTo(size * 0.60, size * 0.45, size * 0.50, size * 0.52);
+      ctx.quadraticCurveTo(size * 0.6, size * 0.45, size * 0.5, size * 0.52);
       ctx.lineTo(size * 0.54, size * 0.65);
-      ctx.quadraticCurveTo(size * 0.64, size * 0.60, size * 0.78, size * 0.62);
+      ctx.quadraticCurveTo(size * 0.64, size * 0.6, size * 0.78, size * 0.62);
       ctx.closePath();
       ctx.fill();
       // Outline for join
@@ -1228,24 +1756,46 @@ export async function generatePartnershipPDF(p: any) {
       ctx.lineWidth = Math.max(1, size * 0.02);
       ctx.beginPath();
       ctx.moveTo(size * 0.34, size * 0.56);
-      ctx.quadraticCurveTo(size * 0.50, size * 0.53, size * 0.66, size * 0.56);
+      ctx.quadraticCurveTo(size * 0.5, size * 0.53, size * 0.66, size * 0.56);
       ctx.stroke();
       return canvas.toDataURL("image/png");
     };
     const hs = await makeHandshakeIcon(140);
-    pdf.addImage(hs, "PNG", handshakeX, handshakeY, handshakeSize, handshakeSize);
+    pdf.addImage(
+      hs,
+      "PNG",
+      handshakeX,
+      handshakeY,
+      handshakeSize,
+      handshakeSize,
+    );
     pdf.setDrawColor(navy.r, navy.g, navy.b);
     pdf.setLineWidth(1.2);
-    pdf.circle(handshakeX + handshakeSize / 2, handshakeY + handshakeSize / 2, handshakeSize / 2, "S");
+    pdf.circle(
+      handshakeX + handshakeSize / 2,
+      handshakeY + handshakeSize / 2,
+      handshakeSize / 2,
+      "S",
+    );
   } catch {
     // Fallback: simple circle with text
     pdf.setDrawColor(gold.r, gold.g, gold.b);
     pdf.setLineWidth(0.6);
-    pdf.circle(handshakeX + handshakeSize / 2, handshakeY + handshakeSize / 2, handshakeSize / 2, "S");
+    pdf.circle(
+      handshakeX + handshakeSize / 2,
+      handshakeY + handshakeSize / 2,
+      handshakeSize / 2,
+      "S",
+    );
     pdf.setFont("times", "bold");
     pdf.setTextColor(navy.r, navy.g, navy.b);
     pdf.setFontSize(10);
-    pdf.text("JV", handshakeX + handshakeSize / 2, handshakeY + handshakeSize / 2 + 3, { align: "center" });
+    pdf.text(
+      "JV",
+      handshakeX + handshakeSize / 2,
+      handshakeY + handshakeSize / 2 + 3,
+      { align: "center" },
+    );
   }
 
   pdf.setFillColor(gold.r, gold.g, gold.b);
@@ -1255,10 +1805,22 @@ export async function generatePartnershipPDF(p: any) {
   pdf.rect(centerX - ribbon2W / 2, ribbon2Y, ribbon2W, ribbon2H, "F");
   pdf.setFont("times", "bold");
   pdf.setTextColor(255, 255, 255);
-  const type = (p?.partnership_type || "Joint Venture").toString().replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
-  const mainShare = p?.ownership_ratio_main ?? (p?.ownership_ratio ? 100 - Number(p.ownership_ratio) : 60);
-  const partnerShare = p?.ownership_ratio_partner ?? (p?.ownership_ratio ? Number(p.ownership_ratio) : 40);
-  pdf.text(`${type} Partnership (${Number(mainShare)}% / ${Number(partnerShare)}%)`, centerX, ribbon2Y + ribbon2H - 2.5, { align: "center" });
+  const type = (p?.partnership_type || "Joint Venture")
+    .toString()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c: string) => c.toUpperCase());
+  const mainShare =
+    p?.ownership_ratio_main ??
+    (p?.ownership_ratio ? 100 - Number(p.ownership_ratio) : 60);
+  const partnerShare =
+    p?.ownership_ratio_partner ??
+    (p?.ownership_ratio ? Number(p.ownership_ratio) : 40);
+  pdf.text(
+    `${type} Partnership (${Number(mainShare)}% / ${Number(partnerShare)}%)`,
+    centerX,
+    ribbon2Y + ribbon2H - 2.5,
+    { align: "center" },
+  );
 
   const detailsY = ribbon2Y + ribbon2H + 16;
   pdf.setTextColor(black.r, black.g, black.b);
@@ -1267,19 +1829,41 @@ export async function generatePartnershipPDF(p: any) {
 
   const idRaw = p?.id || p?.partnership_id || "PENDING";
   const issueDate = (() => {
-    const s = p?.issued_date || p?.start_date || p?.updated_at || new Date().toISOString();
+    const s =
+      p?.issued_date ||
+      p?.start_date ||
+      p?.updated_at ||
+      new Date().toISOString();
     const d = new Date(s);
-    return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    return d.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
   })();
   const endDateStr = (() => {
-    const s = p?.end_date || p?.valid_until || new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString();
+    const s =
+      p?.end_date ||
+      p?.valid_until ||
+      new Date(
+        new Date().setFullYear(new Date().getFullYear() + 1),
+      ).toISOString();
     const d = new Date(s);
-    return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    return d.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
   })();
 
   const formatCertNo = (val: any) => {
-    const year = new Date(p?.issued_date || p?.updated_at || Date.now()).getFullYear();
-    const s = String(val || "").replace(/[^a-zA-Z0-9]/g, "").slice(-6).padStart(6, "0");
+    const year = new Date(
+      p?.issued_date || p?.updated_at || Date.now(),
+    ).getFullYear();
+    const s = String(val || "")
+      .replace(/[^a-zA-Z0-9]/g, "")
+      .slice(-6)
+      .padStart(6, "0");
     return `CP-${year}-${s}`;
   };
 
@@ -1287,7 +1871,11 @@ export async function generatePartnershipPDF(p: any) {
   const partnershipIdDisplay = String(idRaw || "").toLowerCase();
   pdf.text(`Partnership ID: ${partnershipIdDisplay}`, gridX, detailsY);
   pdf.text(`Valid Until: ${endDateStr}`, gridX, detailsY + 8);
-  pdf.text("Authorized for: Major Construction Projects, Import of Machinery, Project Vehicles Registration", gridX, detailsY + 16);
+  pdf.text(
+    "Authorized for: Major Construction Projects, Import of Machinery, Project Vehicles Registration",
+    gridX,
+    detailsY + 16,
+  );
 
   const bottomY = pageHeight - margin - 20;
   const qrSize = 36;
@@ -1313,7 +1901,9 @@ export async function generatePartnershipPDF(p: any) {
     pdf.addImage(qrDataUrl, "PNG", qrX, qrY, qrSize, qrSize);
     pdf.setFont("times", "bold");
     pdf.setTextColor(navy.r, navy.g, navy.b);
-    pdf.text("SCAN TO VERIFY", qrX + qrSize / 2, qrY + qrSize + 6, { align: "center" });
+    pdf.text("SCAN TO VERIFY", qrX + qrSize / 2, qrY + qrSize + 6, {
+      align: "center",
+    });
   } catch {}
 
   const footerH = 10;
@@ -1337,11 +1927,185 @@ export async function generatePartnershipPDF(p: any) {
   pdf.text(`Issued Date: ${issueDate}`, rightX, bottomY);
 
   pdf.setFillColor(navy.r, navy.g, navy.b);
-  pdf.rect(margin + 5, pageHeight - margin - footerH, pageWidth - (margin + 5) * 2, footerH, "F");
+  pdf.rect(
+    margin + 5,
+    pageHeight - margin - footerH,
+    pageWidth - (margin + 5) * 2,
+    footerH,
+    "F",
+  );
   pdf.setTextColor(255, 255, 255);
   pdf.setFont("times", "bold");
   pdf.setFontSize(12);
-  pdf.text("VALID & ACTIVE UNDER CLMS REGULATIONS", pageWidth / 2, pageHeight - margin - 3, { align: "center" });
+  pdf.text(
+    "VALID & ACTIVE UNDER CLMS REGULATIONS",
+    pageWidth / 2,
+    pageHeight - margin - 3,
+    { align: "center" },
+  );
+
+  return pdf;
+}
+
+export async function generatePaymentReceiptPDF(paymentData: any) {
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const date = new Date().toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  // Chapa Brand Colors
+  const chapaBlue = { r: 0, g: 104, b: 255 }; // Chapa Blue
+  const chapaGreen = { r: 0, g: 191, b: 111 }; // Chapa Green
+  const textDark = { r: 31, g: 41, b: 55 };
+  const textGrey = { r: 107, g: 114, b: 128 };
+
+  // Header Section
+  pdf.setFillColor(249, 250, 251); // Light grey background for header
+  pdf.rect(0, 0, pageWidth, 50, "F");
+
+  // Stylized Chapa-like Logo (Text-based)
+  pdf.setTextColor(chapaBlue.r, chapaBlue.g, chapaBlue.b);
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(28);
+  pdf.text("chapa", 20, 30);
+  pdf.setFillColor(chapaGreen.r, chapaGreen.g, chapaGreen.b);
+  pdf.circle(95, 23, 2, "F"); // Small dot after 'chapa'
+
+  pdf.setTextColor(textGrey.r, textGrey.g, textGrey.b);
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(10);
+  pdf.text("OFFICIAL PAYMENT RECEIPT", pageWidth - 20, 28, { align: "right" });
+  pdf.text(`Generated: ${date}`, pageWidth - 20, 34, { align: "right" });
+
+  // Receipt Main Content
+  let y = 70;
+
+  // Status Badge
+  pdf.setFillColor(220, 252, 231); // Green bg
+  pdf.roundedRect(20, y - 5, 30, 8, 1, 1, "F");
+  pdf.setTextColor(21, 128, 61); // Green text
+  pdf.setFontSize(9);
+  pdf.setFont("helvetica", "bold");
+  pdf.text("SUCCESSFUL", 35, y + 0.5, { align: "center" });
+
+  y += 15;
+
+  // Transaction ID Header
+  pdf.setTextColor(textGrey.r, textGrey.g, textGrey.b);
+  pdf.setFontSize(9);
+  pdf.text("TRANSACTION REFERENCE", 20, y);
+  y += 6;
+  pdf.setTextColor(textDark.r, textDark.g, textDark.b);
+  pdf.setFontSize(12);
+  pdf.setFont("courier", "bold");
+  pdf.text(paymentData.tx_ref || "N/A", 20, y);
+
+  y += 15;
+
+  // Amount Large
+  pdf.setTextColor(textGrey.r, textGrey.g, textGrey.b);
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(9);
+  pdf.text("AMOUNT PAID", 20, y);
+  y += 8;
+  pdf.setTextColor(chapaBlue.r, chapaBlue.g, chapaBlue.b);
+  pdf.setFontSize(24);
+  pdf.setFont("helvetica", "bold");
+  pdf.text(`${paymentData.amount} ${paymentData.currency || "ETB"}`, 20, y);
+
+  y += 20;
+
+  // Info Grid (Two Columns)
+  const col1X = 20;
+  const col2X = pageWidth / 2 + 10;
+
+  const drawField = (
+    label: string,
+    value: string,
+    x: number,
+    currY: number,
+  ) => {
+    pdf.setTextColor(textGrey.r, textGrey.g, textGrey.b);
+    pdf.setFontSize(9);
+    pdf.setFont("helvetica", "normal");
+    pdf.text(label, x, currY);
+    pdf.setTextColor(textDark.r, textDark.g, textDark.b);
+    pdf.setFontSize(10);
+    pdf.setFont("helvetica", "bold");
+    pdf.text(value, x, currY + 6);
+  };
+
+  drawField(
+    "PAYER NAME",
+    `${paymentData.first_name || "N/A"} ${paymentData.last_name || ""}`,
+    col1X,
+    y,
+  );
+  drawField(
+    "PAYMENT METHOD",
+    (paymentData.payment_method || "Telebirr").toUpperCase(),
+    col2X,
+    y,
+  );
+
+  y += 20;
+
+  drawField("EMAIL", paymentData.email || "N/A", col1X, y);
+  drawField("DATE", date.split(" at ")[0], col2X, y);
+
+  y += 25;
+
+  // Itemized Details Table
+  autoTable(pdf, {
+    startY: y,
+    head: [["DESCRIPTION", "UNIT PRICE", "TOTAL"]],
+    body: [
+      [
+        "Construction License Processing Fee",
+        `${paymentData.amount} ${paymentData.currency || "ETB"}`,
+        `${paymentData.amount} ${paymentData.currency || "ETB"}`,
+      ],
+    ],
+    theme: "striped",
+    headStyles: {
+      fillColor: [243, 244, 246],
+      textColor: [107, 114, 128],
+      fontSize: 8,
+      fontStyle: "bold",
+    },
+    styles: { fontSize: 10, cellPadding: 5 },
+    columnStyles: { 1: { halign: "right" }, 2: { halign: "right" } },
+    margin: { left: 20, right: 20 },
+  });
+
+  const finalY = (pdf as any).lastAutoTable?.finalY || y + 30;
+
+  // Footer Message
+  pdf.setTextColor(textGrey.r, textGrey.g, textGrey.b);
+  pdf.setFontSize(8);
+  pdf.setFont("helvetica", "normal");
+  const footerText =
+    "This is an official transaction receipt generated for your payment through Chapa. This document serves as proof of payment for services rendered by the Construction Licensing Management System (CLMS).";
+  const lines = pdf.splitTextToSize(footerText, pageWidth - 40);
+  pdf.text(lines, 20, finalY);
+
+  // Verification Seal (Bottom Center)
+  pdf.setDrawColor(229, 231, 235);
+  pdf.setLineWidth(0.5);
+  pdf.line(20, pageHeight - 40, pageWidth - 20, pageHeight - 40);
+
+  pdf.setTextColor(chapaBlue.r, chapaBlue.g, chapaBlue.b);
+  pdf.setFontSize(10);
+  pdf.setFont("helvetica", "bold");
+  pdf.text("Securely processed by chapa.", pageWidth / 2, pageHeight - 25, {
+    align: "center",
+  });
 
   return pdf;
 }

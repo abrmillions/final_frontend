@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { Suspense } from "react"
+import { useEffect, useState, useRef } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -15,11 +16,64 @@ import { generatePartnershipPDF } from "@/lib/downloads/pdf-generator"
 import { copyToClipboard } from "@/lib/button-actions"
 
 export default function PartnershipsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    }>
+      <PartnershipsContent />
+    </Suspense>
+  )
+}
+
+function PartnershipsContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { toast } = useToast()
   const { isAuthenticated, isLoading } = useAuth()
   const [partnerships, setPartnerships] = useState<any[]>([])
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const processedPaidIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const paid = searchParams.get("paid")
+    const id = searchParams.get("id")
+    
+    if (paid === "1" && id && partnerships.length > 0) {
+      // Prevent double download by checking if this ID was already processed
+      if (processedPaidIdRef.current === id) return;
+      
+      const target = partnerships.find((p) => String(p.id) === String(id))
+      if (target) {
+        const triggerDownload = async () => {
+          processedPaidIdRef.current = id;
+          setDownloadingId(target.id)
+          try {
+            const detail = await partnershipsApi.getDetail(String(target.id))
+            const pdf = await generatePartnershipPDF(detail)
+            const fileName = `Partnership-${String(detail.id || target.id)}.pdf`
+            downloadPDF(pdf, fileName)
+            toast({
+              title: "Payment Successful! 🎉",
+              description: "Your partnership certificate has been downloaded.",
+            })
+            // Clean up URL
+            const url = new URL(window.location.href)
+            url.searchParams.delete("paid")
+            url.searchParams.delete("id")
+            window.history.replaceState({}, "", url.toString())
+          } catch (error) {
+            console.error("Failed to download certificate:", error)
+            processedPaidIdRef.current = null; // Reset on failure
+          } finally {
+            setDownloadingId(null)
+          }
+        }
+        triggerDownload()
+      }
+    }
+  }, [searchParams, partnerships, toast])
 
   useEffect(() => {
     // Show background upload indicator when returning from registration
@@ -49,8 +103,9 @@ export default function PartnershipsPage() {
 
         // Normalize backend Partnership objects for UI
         const normalized = arr.map((p: any) => {
+          const rawType = String(p?.partnership_type || "joint_venture")
           const partnershipName = `${p?.main_contractor?.name || "Main"} + ${p?.partner_company?.name || "Partner"}`
-          const partnershipType = String(p?.partnership_type || "joint_venture").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+          const partnershipType = rawType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
           const validUntil = p?.end_date || null
           const certificateNumber = p?.certificate_number || null
           const partners = [
@@ -62,6 +117,7 @@ export default function PartnershipsPage() {
             id: p.id,
             status: p.status || "active",
             registeredAt: p.created_at,
+            rawType,
             data: {
               partnershipName,
               partnershipType,
@@ -113,26 +169,12 @@ export default function PartnershipsPage() {
       })
       return
     }
-    setDownloadingId(partnership.id)
-    try {
-      const detail = await partnershipsApi.getDetail(String(partnership.id))
-      const pdf = await generatePartnershipPDF(detail)
-      const fileName = `Partnership-${String(detail.id || partnership.id)}.pdf`
-      downloadPDF(pdf, fileName)
-      toast({
-        title: "Downloaded",
-        description: "Partnership certificate has been downloaded.",
-      })
-    } catch (error) {
-      console.error("Error downloading:", error)
-      toast({
-        title: "Error",
-        description: "Failed to download certificate.",
-        variant: "destructive",
-      })
-    } finally {
-      setDownloadingId(null)
-    }
+
+    const type = String(partnership.rawType || "").toLowerCase()
+    const category = (type.includes("foreign") || type.includes("local")) ? "partnership-foreign" : "partnership-standard"
+
+    // Redirect to payment page instead of downloading directly
+    router.push(`/dashboard/payments/certificate/${partnership.id}?section=partnership&category=${category}`)
   }
 
   const handleCopyCertificate = async (code: string | null) => {
@@ -163,24 +205,24 @@ export default function PartnershipsPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4 flex flex-col sm:flex-row gap-3 sm:gap-0 sm:items-center sm:justify-between">
+        <div className="container mx-auto px-4 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center shrink-0">
               <Building2 className="w-6 h-6 text-primary-foreground" />
             </div>
-            <div>
-              <h1 className="text-lg font-semibold text-foreground">Partnership Management</h1>
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold text-foreground truncate">Partnership Management</h1>
               <p className="text-xs text-muted-foreground">{partnerships.length} partnerships registered</p>
             </div>
           </div>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <Button asChild className="h-8 px-3 text-xs w-full sm:w-auto">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+            <Button asChild size="sm" className="h-8 px-3 text-xs w-full sm:w-auto">
               <Link href="/dashboard/partnerships/register">
                 <Plus className="w-4 h-4 mr-2" />
                 Register Partnership
               </Link>
             </Button>
-            <Button variant="outline" asChild className="h-8 px-3 text-xs w-full sm:w-auto">
+            <Button variant="outlineBlueHover" size="sm" asChild className="h-8 px-3 text-xs w-full sm:w-auto">
               <Link href="/dashboard">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Dashboard
@@ -210,72 +252,80 @@ export default function PartnershipsPage() {
         ) : (
           <div className="space-y-4">
             {partnerships.map((partnership) => (
-              <Card key={partnership.id} className="hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <CardTitle className="text-lg">{partnership.data.partnershipName}</CardTitle>
-                      <CardDescription>
-                        Partnership ID: {partnership.id} • Registered{" "}
+              <Card key={partnership.id} className="hover:shadow-md transition-all duration-200 border-slate-200 overflow-hidden">
+                <CardHeader className="px-4 sm:px-6 py-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <CardTitle className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
+                        {partnership.data.partnershipName}
+                      </CardTitle>
+                      <CardDescription className="text-[10px] sm:text-xs mt-1 font-medium">
+                        ID: {partnership.id} • Registered{" "}
                         {new Date(partnership.registeredAt).toLocaleDateString()}
                       </CardDescription>
                     </div>
-                    {getStatusBadge(partnership.status)}
+                    <div className="shrink-0 scale-90 sm:scale-100 origin-right">
+                      {getStatusBadge(partnership.status)}
+                    </div>
                   </div>
                 </CardHeader>
-                <CardContent>
-                  <div className="grid md:grid-cols-3 gap-4 text-sm mb-4">
+                <CardContent className="px-4 sm:px-6 pb-5 pt-0">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 text-xs sm:text-sm mb-5 p-3 sm:p-4 bg-slate-50/50 rounded-xl border border-slate-100">
                     <div>
-                      <span className="text-muted-foreground">Type:</span>
-                      <p className="font-medium text-foreground">{partnership.data.partnershipType}</p>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Type</span>
+                      <p className="font-semibold text-slate-900">{partnership.data.partnershipType}</p>
                     </div>
                     <div>
-                      <span className="text-muted-foreground">Partners:</span>
-                      <p className="font-medium text-foreground">{partnership.data.partners?.length || 0}</p>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Partners</span>
+                      <p className="font-semibold text-slate-900">{partnership.data.partners?.length || 0} Companies</p>
                     </div>
                     <div>
-                      <span className="text-muted-foreground">Valid Until:</span>
-                      <p className="font-medium text-foreground">{partnership.data.validUntil || "N/A"}</p>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Valid Until</span>
+                      <p className="font-semibold text-slate-900">{partnership.data.validUntil || "N/A"}</p>
                     </div>
                   </div>
+                  
                   {partnership.data.certificateNumber && (
-                    <div className="text-xs text-muted-foreground mb-4 flex items-center gap-2">
-                      <span>
-                        Certificate ID:{" "}
-                        <span className="font-mono text-foreground">{partnership.data.certificateNumber}</span>
-                      </span>
+                    <div className="mb-5 p-3 bg-blue-50/30 rounded-lg border border-blue-100/50 flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider block mb-0.5">Certificate ID</span>
+                        <code className="text-[11px] sm:text-xs font-mono font-bold text-blue-700 break-all">{partnership.data.certificateNumber}</code>
+                      </div>
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
+                        className="h-7 px-2 text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 shrink-0"
                         onClick={() => handleCopyCertificate(partnership.data.certificateNumber)}
                       >
-                        <Copy className="w-3 h-3 mr-1" />
-                        Copy
+                        <Copy className="w-3 h-3 mr-1.5" />
+                        COPY ID
                       </Button>
                     </div>
                   )}
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" asChild>
+
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button variant="outline" size="sm" className="h-9 px-4 text-xs font-bold shadow-sm flex-1 sm:flex-none" asChild>
                       <Link href={`/dashboard/partnerships/${partnership.id}`}>
-                        <Eye className="w-4 h-4 mr-2" />
-                        View Details
+                        <Eye className="w-3.5 h-3.5 mr-2" />
+                        Details
                       </Link>
                     </Button>
                     {partnership.status === "active" && (
                       <Button
                         variant="outline"
                         size="sm"
+                        className="h-9 px-4 text-xs font-bold border-blue-200 text-blue-700 hover:bg-blue-50 shadow-sm flex-1 sm:flex-none"
                         onClick={() => handleDownloadCertificate(partnership)}
                         disabled={downloadingId === partnership.id}
                       >
-                        <Download className="w-4 h-4 mr-2" />
-                        {downloadingId === partnership.id ? "Downloading..." : "Download Certificate"}
+                        <Download className="w-3.5 h-3.5 mr-2" />
+                        {downloadingId === partnership.id ? "..." : "Certificate"}
                       </Button>
                     )}
                     {["active", "approved"].includes(String(partnership.status || "").toLowerCase()) && (
-                      <Button variant="outline" size="sm" asChild>
+                      <Button variant="outline" size="sm" className="h-9 px-4 text-xs font-bold border-slate-200 shadow-sm flex-1 sm:flex-none" asChild>
                         <Link href={`/partner/public/verify?id=${encodeURIComponent(partnership.id)}`}>
-                          Verify Partnership
+                          Verify
                         </Link>
                       </Button>
                     )}

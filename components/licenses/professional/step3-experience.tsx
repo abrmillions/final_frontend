@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Trash2 } from "lucide-react"
 import { useState } from "react"
 
@@ -73,13 +74,17 @@ export function ProfessionalStep3({ data, updateData, onNext, onBack }: Step3Pro
 
         <div className="space-y-2 md:col-span-2">
           <Label htmlFor="position">Current Position *</Label>
-          <Input
-            id="position"
-            value={data.position}
-            onChange={(e) => updateData({ position: e.target.value })}
-            placeholder="Senior Engineer, Project Manager, etc."
-            required
-          />
+          <Select value={data.position} onValueChange={(value) => updateData({ position: value })}>
+            <SelectTrigger id="position">
+              <SelectValue placeholder="Select current position" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Engineer">Engineer</SelectItem>
+              <SelectItem value="Architect">Architect</SelectItem>
+              <SelectItem value="Surveyor">Surveyor</SelectItem>
+              <SelectItem value="Consultant">Consultant</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

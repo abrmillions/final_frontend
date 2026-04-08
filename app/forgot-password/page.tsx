@@ -49,9 +49,9 @@ export default function ForgotPasswordPage() {
               <label className="block text-sm mb-1">Email</label>
               <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required />
             </div>
-            <div className="flex gap-2">
-              <Button type="submit">Send reset link</Button>
-              <Button variant="secondary" onClick={() => router.push('/login')}>Back to login</Button>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button type="submit" className="w-full sm:w-auto">Send reset link</Button>
+              <Button variant="secondary" className="w-full sm:w-auto" onClick={() => router.push('/login')}>Back to login</Button>
             </div>
             {resetUrl && (
               <div className="mt-2 text-sm text-muted-foreground">

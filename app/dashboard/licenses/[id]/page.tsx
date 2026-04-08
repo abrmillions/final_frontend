@@ -6,12 +6,12 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Building2, ArrowLeft, Printer, Share2, Loader2 } from "lucide-react"
+import { Building2, ArrowLeft, Share2, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { generateLicensePDF } from "@/lib/downloads/pdf-generator"
 import { downloadPDF } from "@/lib/downloads/file-download"
 import { generateQRDataURL, createVerificationUrl, downloadQRCode, createLicenseQRPayload } from "@/lib/qr/qr-utils"
-import { shareLink, printPage, copyToClipboard } from "@/lib/button-actions"
+import { shareLink, copyToClipboard } from "@/lib/button-actions"
 import { DJANGO_API_URL } from "@/lib/config/django-api"
 
 export default function LicenseDetail() {
@@ -174,14 +174,6 @@ export default function LicenseDetail() {
     loadLicense()
   }, [id, toast])
 
-  const handlePrint = () => {
-    printPage()
-    toast({
-      title: "Print",
-      description: "Print dialog opened",
-    })
-  }
-
   const handleDownloadPDF = async () => {
     if (!license) return
     setIsDownloading(true)
@@ -255,7 +247,7 @@ export default function LicenseDetail() {
         <Card className="w-full max-w-md">
           <CardContent className="p-12 text-center">
             <p className="text-red-600 font-semibold mb-4">License not found</p>
-            <Button asChild>
+            <Button variant="outlineBlueHover" asChild>
               <Link href="/dashboard/licenses">Back to Licenses</Link>
             </Button>
           </CardContent>
@@ -266,16 +258,16 @@ export default function LicenseDetail() {
 
   return (
     <div className="min-h-screen bg-linear-to-br from-slate-50 to-slate-100">
-      <header className="border-b bg-white print:hidden">
+      <header className="border-b bg-white print:hidden sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 shrink-0">
                 <Building2 className="h-6 w-6 text-white" />
               </div>
-              <div>
-                <h1 className="text-xl font-bold text-slate-900">License Certificate</h1>
-                <p className="text-sm text-slate-600">{(function(){
+              <div className="min-w-0">
+                <h1 className="text-lg sm:text-xl font-bold text-slate-900 line-clamp-1">License Certificate</h1>
+                <p className="text-xs sm:text-sm text-slate-600">{(function(){
                   try {
                     const raw = license.licenseNumber || license.id || ''
                     if (!raw) return 'PENDING'
@@ -287,7 +279,7 @@ export default function LicenseDetail() {
                 })()}</p>
               </div>
             </div>
-            <Button variant="outline" asChild>
+            <Button variant="outlineBlueHover" size="sm" asChild className="w-full sm:w-auto">
               <Link href="/dashboard/licenses">
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to Licenses
@@ -304,35 +296,35 @@ export default function LicenseDetail() {
               <CardTitle>Actions</CardTitle>
               <CardDescription>Manage this license</CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-2 md:grid-cols-2">
+            <CardContent className="grid gap-2 sm:grid-cols-2">
               {String(license.type || '').toLowerCase().includes('contractor') && (
                 <>
-                  <Button asChild>
+                  <Button asChild className="w-full">
                     <Link href={`/dashboard/licenses/${id}/renew`}>Renew Registration</Link>
                   </Button>
-                  <Button asChild variant="outline" className="bg-transparent">
+                  <Button asChild variant="outline" className="bg-transparent w-full">
                     <Link href={`/dashboard/licenses/${id}/change-grade`}>Change Grade</Link>
                   </Button>
-                  <Button asChild variant="outline" className="bg-transparent">
+                  <Button asChild variant="outline" className="bg-transparent w-full">
                     <Link href={`/dashboard/licenses/${id}/name-change`}>Name Change</Link>
                   </Button>
-                  <Button asChild variant="outline" className="bg-transparent">
+                  <Button asChild variant="outline" className="bg-transparent w-full">
                     <Link href={`/dashboard/licenses/${id}/replacement`}>Replacement (Lost)</Link>
                   </Button>
                 </>
               )}
               {String(license.type || '').toLowerCase().includes('professional') && (
                 <>
-                  <Button asChild>
+                  <Button asChild className="w-full">
                     <Link href={`/dashboard/licenses/${id}/renew`}>Renew License</Link>
                   </Button>
-                  <Button asChild variant="outline" className="bg-transparent">
+                  <Button asChild variant="outline" className="bg-transparent w-full">
                     <Link href={`/dashboard/professional-license/upgrade`}>Upgrade</Link>
                   </Button>
-                  <Button asChild variant="outline" className="bg-transparent">
+                  <Button asChild variant="outline" className="bg-transparent w-full">
                     <Link href={`/dashboard/professional-license/upgrade-to-practicing`}>Upgrade to Practicing</Link>
                   </Button>
-                  <Button asChild variant="outline" className="bg-transparent">
+                  <Button asChild variant="outline" className="bg-transparent w-full">
                     <Link href={`/dashboard/licenses/${id}/replacement`}>Replacement (Lost)</Link>
                   </Button>
                 </>
@@ -352,34 +344,34 @@ export default function LicenseDetail() {
             <div className="absolute bottom-0 left-0 w-16 h-16 border-b-4 border-l-4 border-[#D4AF37] rounded-bl-none"></div>
             <div className="absolute bottom-0 right-0 w-16 h-16 border-b-4 border-r-4 border-[#D4AF37] rounded-br-none"></div>
 
-            <CardHeader className="text-center pt-12 pb-2 relative z-10">
-              <div className="flex items-center justify-center gap-3 mb-6">
+            <CardHeader className="text-center pt-8 sm:pt-12 pb-2 relative z-10">
+              <div className="flex items-center justify-center gap-3 mb-4 sm:mb-6">
                  {/* Gold Building Logo */}
                  <div className="relative">
                    <div className="absolute inset-0 bg-[#D4AF37] blur-sm opacity-20 rounded-full"></div>
-                   <Building2 className="h-16 w-16 text-[#D4AF37]" />
+                   <Building2 className="h-12 w-12 sm:h-16 sm:w-16 text-[#D4AF37]" />
                  </div>
               </div>
-              <CardTitle className="text-4xl mb-4 font-serif font-bold text-[#D4AF37] tracking-wider uppercase">
+              <CardTitle className="text-2xl sm:text-4xl mb-4 font-serif font-bold text-[#D4AF37] tracking-wider uppercase">
                 {license.type.endsWith('License') ? license.type : `${license.type} LICENSE`}
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-8 relative z-10">
+            <CardContent className="p-4 sm:p-8 relative z-10">
               {/* Photo Section */}
               <div className="flex flex-col items-center mb-6">
-                <div className="p-1 border-2 border-[#D4AF37] shadow-lg mb-6 bg-white">
+                <div className="p-1 border-2 border-[#D4AF37] shadow-lg mb-4 sm:mb-6 bg-white">
                   {license.photoUrl ? (
-                    <img src={license.photoUrl} alt="License photo" className="w-32 h-40 object-cover" />
+                    <img src={license.photoUrl} alt="License photo" className="w-24 h-32 sm:w-32 sm:h-40 object-cover" />
                   ) : (
-                    <div className="w-32 h-40 bg-slate-100 flex items-center justify-center">
-                      <span className="text-slate-300 text-4xl">?</span>
+                    <div className="w-24 h-32 sm:w-32 sm:h-40 bg-slate-100 flex items-center justify-center">
+                      <span className="text-slate-300 text-3xl sm:text-4xl">?</span>
                     </div>
                   )}
                 </div>
                 
                 {/* License Number - Single Line */}
                 <div className="text-center border-b border-[#D4AF37]/30 pb-4 w-full max-w-lg mx-auto mb-4">
-                  <p className="text-lg font-serif font-bold text-slate-900 uppercase tracking-wide">
+                  <p className="text-base sm:text-lg font-serif font-bold text-slate-900 uppercase tracking-wide">
                     LICENSE NO.: {(function(){
                       try {
                         const raw = license.licenseNumber || license.registrationNumber || license.id || ''
@@ -393,46 +385,46 @@ export default function LicenseDetail() {
                   </p>
                 </div>
 
-                <h2 className="text-4xl font-serif font-bold text-slate-900 text-center uppercase tracking-tight mb-2">
+                <h2 className="text-2xl sm:text-4xl font-serif font-bold text-slate-900 text-center uppercase tracking-tight mb-2">
                   {license.holderName}
                 </h2>
               </div>
 
-              <div className="grid gap-8 md:grid-cols-1">
+              <div className="grid gap-6 sm:gap-8 md:grid-cols-1">
                 <div className="space-y-6 text-center">
                   {/* License Info - Centered Multi-row */}
-                  <div className="flex flex-col items-center gap-3 text-sm md:text-base border-t border-b border-[#D4AF37]/30 py-6 max-w-2xl mx-auto w-full">
+                  <div className="flex flex-col items-center gap-3 text-sm md:text-base border-t border-b border-[#D4AF37]/30 py-4 sm:py-6 max-w-2xl mx-auto w-full">
                     {/* Row 1: Type and Company */}
-                    <div className="flex flex-wrap justify-center items-center gap-4 md:gap-8 text-slate-800">
+                    <div className="flex flex-col sm:flex-row flex-wrap justify-center items-center gap-2 sm:gap-4 md:gap-8 text-slate-800">
                         <div className="flex items-center gap-2">
-                          <span className="text-[#D4AF37]">•</span>
+                          <span className="text-[#D4AF37] hidden sm:inline">•</span>
                           <span className="font-semibold text-slate-700">License Type:</span>
-                          <span className="font-serif uppercase">
+                          <span className="font-serif uppercase text-xs sm:text-sm md:text-base">
                             {license.type.endsWith('License') ? license.type : `${license.type} LICENSE`}
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-[#D4AF37]">•</span>
+                          <span className="text-[#D4AF37] hidden sm:inline">•</span>
                           <span className="font-semibold text-slate-700">Company:</span>
-                          <span className="font-serif uppercase">{license.companyName}</span>
+                          <span className="font-serif uppercase text-xs sm:text-sm md:text-base">{license.companyName}</span>
                         </div>
                     </div>
 
                     {/* Row 2: Category */}
                     <div className="flex items-center gap-2 text-slate-800">
-                      <span className="text-[#D4AF37]">•</span>
+                      <span className="text-[#D4AF37] hidden sm:inline">•</span>
                       <span className="font-semibold text-slate-700">Category:</span>
-                      <span className="font-serif uppercase">{license.category}</span>
+                      <span className="font-serif uppercase text-xs sm:text-sm md:text-base">{license.category}</span>
                     </div>
 
                     {/* Row 3: Status Badge */}
-                    <div className="mt-2">
+                    <div className="mt-1 sm:mt-2">
                        {(license.status === 'active' || license.status === 'approved') ? (
-                           <Badge className="bg-emerald-600 hover:bg-emerald-700 px-8 py-1.5 text-xs font-bold uppercase tracking-wider rounded-full shadow-sm border-0">
+                           <Badge className="bg-emerald-600 hover:bg-emerald-700 px-6 sm:px-8 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-full shadow-sm border-0">
                              Active
                            </Badge>
                        ) : (
-                           <Badge variant="outline" className="px-6 py-1 uppercase tracking-wide border-slate-400 text-slate-600">
+                           <Badge variant="outline" className="px-4 sm:px-6 py-1 text-[10px] sm:text-xs uppercase tracking-wide border-slate-400 text-slate-600">
                              {license.status}
                            </Badge>
                        )}
@@ -440,23 +432,23 @@ export default function LicenseDetail() {
                   </div>
 
                   {/* Dates */}
-                  <div className="flex justify-between items-center max-w-lg mx-auto w-full px-8">
-                    <div className="text-left">
-                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Issued Date</p>
-                      <p className="text-base font-serif text-slate-900">
+                  <div className="flex flex-row justify-between items-center max-w-lg mx-auto w-full px-4 sm:px-8 gap-4">
+                    <div className="text-left flex-1">
+                      <p className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wide">Issued Date</p>
+                      <p className="text-sm sm:text-base font-serif text-slate-900">
                         {new Date(license.issueDate).toLocaleDateString("en-US", {
                           year: "numeric",
-                          month: "long",
+                          month: "short",
                           day: "numeric",
                         })}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Expiry Date</p>
-                      <p className="text-base font-serif text-slate-900">
+                    <div className="text-right flex-1">
+                      <p className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wide">Expiry Date</p>
+                      <p className="text-sm sm:text-base font-serif text-slate-900">
                         {new Date(license.expiryDate).toLocaleDateString("en-US", {
                           year: "numeric",
-                          month: "long",
+                          month: "short",
                           day: "numeric",
                         })}
                       </p>
@@ -465,31 +457,31 @@ export default function LicenseDetail() {
                 </div>
 
                 {/* Footer Section: QR, Signature, Seal */}
-                <div className="flex flex-col md:flex-row items-end justify-between mt-12 pt-8 gap-8">
+                <div className="flex flex-col sm:flex-row items-center sm:items-end justify-between mt-8 sm:mt-12 pt-6 sm:pt-8 gap-8 sm:gap-4">
                   {/* QR Code */}
-                  <div className="flex flex-col items-center md:items-start">
+                  <div className="flex flex-col items-center sm:items-start order-3 sm:order-1">
                     <div className="bg-white p-2 border border-slate-200 shadow-sm">
-                       <img src={qrDataUrl || "/placeholder.svg"} alt="QR" className="w-24 h-24" />
+                       <img src={qrDataUrl || "/placeholder.svg"} alt="QR" className="w-20 h-20 sm:w-24 sm:h-24" />
                     </div>
-                    <p className="text-[10px] text-slate-400 mt-1 max-w-25 text-center md:text-left leading-tight">
+                    <p className="text-[10px] text-slate-400 mt-1 max-w-25 text-center sm:text-left leading-tight">
                       Scan to verify authenticity
                     </p>
                   </div>
 
                   {/* Signature */}
-                  <div className="flex flex-col items-center justify-center flex-1 w-full">
-                    <div className="w-48 border-b border-slate-900 mb-2"></div>
-                    <p className="font-serif italic text-slate-900">Authorized Signature</p>
-                    <p className="text-xs text-slate-500 uppercase tracking-wider mt-1">Registrar of Licenses</p>
+                  <div className="flex flex-col items-center justify-center flex-1 w-full order-2">
+                    <div className="w-32 sm:w-48 border-b border-slate-900 mb-2"></div>
+                    <p className="font-serif italic text-slate-900 text-sm sm:text-base">Authorized Signature</p>
+                    <p className="text-[10px] sm:text-xs text-slate-500 uppercase tracking-wider mt-1">Registrar of Licenses</p>
                   </div>
 
                   {/* Seal */}
-                  <div className="flex flex-col items-center">
-                    <div className="relative w-24 h-24 flex items-center justify-center">
+                  <div className="flex flex-col items-center order-1 sm:order-3">
+                    <div className="relative w-20 h-20 sm:w-24 sm:h-24 flex items-center justify-center">
                       {/* Gold Seal CSS simulation */}
                       <div className="absolute inset-0 bg-[#D4AF37] rounded-full shadow-lg flex items-center justify-center border-4 border-[#B8860B] border-dashed">
-                        <div className="w-20 h-20 border border-[#B8860B] rounded-full flex items-center justify-center">
-                           <div className="text-white font-bold text-[10px] transform -rotate-12 text-center leading-tight">
+                        <div className="w-16 h-16 sm:w-20 sm:h-20 border border-[#B8860B] rounded-full flex items-center justify-center">
+                           <div className="text-white font-bold text-[8px] sm:text-[10px] transform -rotate-12 text-center leading-tight">
                              OFFICIAL<br/>APPROVED<br/>SEAL
                            </div>
                         </div>
@@ -511,11 +503,6 @@ export default function LicenseDetail() {
                 if (!statusAllowed) return null
                 return (
                   <div className="mt-8 flex flex-wrap gap-3 print:hidden">
-                    <Button onClick={handlePrint}>
-                      <Printer className="h-4 w-4 mr-2" />
-                      Print Certificate
-                    </Button>
-                    {/* Download PDF button removed per request */}
                     <Button variant="outline" onClick={handleShare}>
                       <Share2 className="h-4 w-4 mr-2" />
                       Share Verification Link

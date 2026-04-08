@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { applicationsApi, documentsApi } from "@/lib/api/django-client";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth/auth-context";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 type PracticingForm = {
   justification: string;
@@ -19,6 +21,9 @@ type PracticingForm = {
 export default function ProfessionalUpgradeToPracticingPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { maintenanceMode, user } = useAuth();
+  const isAdmin = (user?.role || "").toLowerCase() === "admin";
+  const disabled = maintenanceMode && !isAdmin;
 
   const [form, setForm] = useState<PracticingForm>({
     justification: "",
@@ -42,6 +47,10 @@ export default function ProfessionalUpgradeToPracticingPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (disabled) {
+      toast({ title: "Maintenance in Progress", description: "Submissions are temporarily disabled.", variant: "destructive" });
+      return;
+    }
     setError(null);
     if (!form.justification.trim()) {
       setError("Justification is required.");
@@ -88,6 +97,12 @@ export default function ProfessionalUpgradeToPracticingPage() {
             <CardDescription>Request practicing status for your professional license.</CardDescription>
           </CardHeader>
           <CardContent>
+            {disabled && (
+              <Alert className="border-amber-300 bg-amber-50 text-amber-800 mb-4">
+                <AlertTitle>Maintenance in Progress</AlertTitle>
+                <AlertDescription>Submissions are temporarily disabled.</AlertDescription>
+              </Alert>
+            )}
             {error && <div className="mb-4 text-sm text-destructive whitespace-pre-wrap">{error}</div>}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
@@ -111,7 +126,7 @@ export default function ProfessionalUpgradeToPracticingPage() {
                 </div>
               </div>
               <div className="pt-4">
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting || disabled}>
                   {submitting ? "Submitting..." : "Submit Request"}
                 </Button>
               </div>

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-import { Users, ArrowLeft } from "lucide-react"
+import { Users, ArrowLeft, Plus } from "lucide-react"
 import Link from "next/link"
 import { PartnershipStep1 } from "@/components/partnerships/step1-basic-info"
 import { PartnershipStep2 } from "@/components/partnerships/step2-partners"
@@ -13,10 +13,15 @@ import { PartnershipStep3 } from "@/components/partnerships/step3-documents"
 import { PartnershipStep4 } from "@/components/partnerships/step4-review"
 import { partnershipsApi } from "@/lib/api/django-client"
 import { useToast } from "@/hooks/use-toast"
+import { useAuth } from "@/lib/auth/auth-context"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 export default function RegisterPartnershipPage() {
   const router = useRouter()
   const { toast } = useToast()
+  const { maintenanceMode, user } = useAuth()
+  const isAdmin = (user?.role || "").toLowerCase() === "admin"
+  const disabled = maintenanceMode && !isAdmin
   const [currentStep, setCurrentStep] = useState(1)
   const [formData, setFormData] = useState({
     partnershipName: "",
@@ -64,6 +69,10 @@ export default function RegisterPartnershipPage() {
   }
 
   const handleSubmit = async () => {
+    if (disabled) {
+      toast({ title: "Maintenance in Progress", description: "Submissions are temporarily disabled.", variant: "destructive" })
+      return
+    }
     try {
       const partners = formData.partners || []
       if (!partners || partners.length < 2) {
@@ -169,15 +178,6 @@ export default function RegisterPartnershipPage() {
     } catch (err: any) {
       // Prefer quiet handling with a clear toast; avoid noisy console/error overlays
       const msg = (err?.error?.detail && String(err.error.detail).trim()) || (err?.message && String(err.message).trim()) || ""
-      const lc = msg.toLowerCase()
-      if (lc.includes("already registered a partnership")) {
-        toast({
-          title: "Already Registered",
-          description: "You have already registered a partnership with this account.",
-        })
-        router.push("/dashboard/partnerships")
-        return
-      }
       toast({
         title: "Registration Failed",
         description: msg || "Failed to register partnership.",
@@ -189,22 +189,24 @@ export default function RegisterPartnershipPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="container mx-auto px-4 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-              <Users className="w-6 h-6 text-primary-foreground" />
+            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center shrink-0">
+              <Plus className="w-6 h-6 text-primary-foreground" />
             </div>
-            <div>
-              <h1 className="text-lg font-semibold text-foreground">Register Partnership</h1>
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold text-foreground truncate">
+                Register New Partnership
+              </h1>
               <p className="text-xs text-muted-foreground">
                 Step {currentStep} of {steps.length}
               </p>
             </div>
           </div>
-          <Button variant="outline" asChild>
+          <Button variant="outlineBlueHover" size="sm" asChild className="w-full sm:w-auto">
             <Link href="/dashboard/partnerships">
               <ArrowLeft className="w-4 h-4 mr-2" />
-              Back
+              Back to Partnerships
             </Link>
           </Button>
         </div>
@@ -212,23 +214,27 @@ export default function RegisterPartnershipPage() {
 
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <div className="mb-8">
-          <Progress value={progress} className="h-2 mb-4" />
-          <div className="grid grid-cols-4 gap-4">
+          <Progress value={progress} className="h-2 mb-6" />
+          <div className="grid grid-cols-4 gap-1 sm:gap-2">
             {steps.map((step) => (
               <div key={step.number} className="text-center">
                 <div
-                  className={`w-10 h-10 rounded-full mx-auto mb-2 flex items-center justify-center font-semibold ${
-                    currentStep >= step.number ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                  className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full mx-auto mb-2 flex items-center justify-center font-bold text-xs sm:text-sm transition-colors ${
+                    currentStep >= step.number
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "bg-muted text-muted-foreground"
                   }`}
                 >
                   {step.number}
                 </div>
                 <div
-                  className={`text-sm font-medium ${
-                    currentStep >= step.number ? "text-foreground" : "text-muted-foreground"
+                  className={`text-[9px] sm:text-xs font-bold uppercase tracking-tighter sm:tracking-wider line-clamp-1 ${
+                    currentStep >= step.number
+                      ? "text-primary"
+                      : "text-muted-foreground"
                   }`}
                 >
-                  {step.title}
+                  {step.title.split(" ")[0]}
                 </div>
               </div>
             ))}
@@ -241,6 +247,12 @@ export default function RegisterPartnershipPage() {
             <CardDescription>{steps[currentStep - 1].description}</CardDescription>
           </CardHeader>
           <CardContent>
+          {disabled && (
+            <Alert className="border-amber-300 bg-amber-50 text-amber-800 mb-4">
+              <AlertTitle>Maintenance in Progress</AlertTitle>
+              <AlertDescription>Submissions are temporarily disabled.</AlertDescription>
+            </Alert>
+          )}
             {currentStep === 1 && <PartnershipStep1 data={formData} updateData={updateFormData} onNext={handleNext} />}
             {currentStep === 2 && (
               <PartnershipStep2 data={formData} updateData={updateFormData} onNext={handleNext} onBack={handleBack} />

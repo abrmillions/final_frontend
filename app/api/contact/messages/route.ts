@@ -14,6 +14,15 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  try {
+    const settingsUrl = new URL('/api/system/settings/', DJANGO_API_URL)
+    const s = await fetch(settingsUrl.toString(), { method: 'GET', headers: request.headers }).then(r => r.json()).catch(() => null)
+    const isMaintenance = !!(s && (s.maintenance_mode ?? s.maintenanceMode))
+    if (isMaintenance) {
+      const payload = JSON.stringify({ detail: 'The system is currently in Maintenance in Progress updating. Please try again later.' })
+      return new NextResponse(payload, { status: 503, headers: { 'Content-Type': 'application/json' } })
+    }
+  } catch {}
   const incoming = new URL(request.url)
   const url = new URL('/api/contact/messages/', DJANGO_API_URL)
   const buf = await request.arrayBuffer().catch(() => null)
